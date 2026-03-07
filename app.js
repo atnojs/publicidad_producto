@@ -34,7 +34,11 @@ function App() {
     }, []);
 
     useEffect(() => {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+        } catch (e) {
+            console.warn("No se pudo guardar el historial completo en localStorage (las imágenes base64 superan los 5MB permitidos por el navegador). Las imágenes se mantendrán en esta sesión.");
+        }
     }, [history]);
 
     // Refrescar iconos Lucide

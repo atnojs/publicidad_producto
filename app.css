@@ -125,9 +125,8 @@ body {
 .loading-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.4);
-    backdrop-filter: blur(25px);
-    /* Desenfoque más pronunciado para efecto premium */
+    background: rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(8px);
     z-index: 50000;
     display: flex;
     flex-direction: column;

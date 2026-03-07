@@ -167,17 +167,28 @@ function App() {
         setHistory(prev => prev.map(item => item.id === results.id ? newResults : item));
     };
 
-    const generateVideo = (proposalIdx, assetIdx) => {
-        const newResults = { ...results };
-        const asset = newResults.proposals[proposalIdx].assets[assetIdx];
+    const generateVideo = async (proposalIdx, assetIdx) => {
+        const currentAsset = results.proposals[proposalIdx].assets[assetIdx];
+        if (currentAsset.videoUrl || currentAsset.videoLoading) return;
 
-        if (asset.videoUrl) return; // Ya tiene video
+        // Iniciar estado de carga para el video
+        setResults(prev => {
+            const updated = JSON.parse(JSON.stringify(prev));
+            updated.proposals[proposalIdx].assets[assetIdx].videoLoading = true;
+            return updated;
+        });
 
-        // Simulación de generación de video
-        asset.videoUrl = 'https://atnojs.es/recursos/demo-video-placeholder.mp4';
+        // Simulación de tiempo de espera para que la IA genere el video (ej. 4 segundos)
+        await new Promise(resolve => setTimeout(resolve, 4000));
 
-        setResults(newResults);
-        setHistory(prev => prev.map(item => item.id === results.id ? newResults : item));
+        // Completar video
+        setResults(prev => {
+            const updated = JSON.parse(JSON.stringify(prev));
+            updated.proposals[proposalIdx].assets[assetIdx].videoUrl = 'https://atnojs.es/recursos/demo-video-placeholder.mp4';
+            updated.proposals[proposalIdx].assets[assetIdx].videoLoading = false;
+            setHistory(prevHist => prevHist.map(item => item.id === updated.id ? updated : item));
+            return updated;
+        });
     };
 
     const deleteHistoryItem = (id) => {
@@ -295,20 +306,9 @@ function App() {
                                         disabled={isGenerating || !imagePreview || !description}
                                         className="w-full py-5 rounded-2xl bg-gradient-to-r from-cyan-500 to-indigo-600 font-bold text-lg flex items-center justify-center gap-3 shadow-[0_10px_30px_rgba(6,182,212,0.3)] hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
-                                        {isGenerating ? <i data-lucide="loader-2" className="animate-spin"></i> : <i data-lucide="sparkles"></i>}
-                                        {isGenerating ? 'PROCESANDO...' : 'GENERAR PROPUESTA MAESTRA'}
+                                        {isGenerating ? <i data-lucide="loader-2" className="animate-spin text-white"></i> : <i data-lucide="sparkles" className="text-white"></i>}
+                                        <span className="text-white">{isGenerating ? 'PROCESANDO...' : 'GENERAR PROPUESTA MAESTRA'}</span>
                                     </button>
-
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="glass p-4 rounded-xl flex items-center gap-3">
-                                            <i data-lucide="image" className="text-cyan-400 w-5 h-5"></i>
-                                            <span className="text-xs font-semibold">8 VARIACIONES PREMIUM</span>
-                                        </div>
-                                        <div className="glass p-4 rounded-xl flex items-center gap-3">
-                                            <i data-lucide="video" className="text-fuchsia-400 w-5 h-5"></i>
-                                            <span className="text-xs font-semibold">VIDEO BAJO DEMANDA</span>
-                                        </div>
-                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -380,9 +380,14 @@ function App() {
                                                             <button
                                                                 onClick={() => generateVideo(activeProposalIdx, index)}
                                                                 className="w-8 h-8 rounded-full bg-fuchsia-600/80 hover:bg-fuchsia-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
+                                                                disabled={asset.videoLoading}
                                                             >
-                                                                <i data-lucide="video" className="w-4 h-4 text-white"></i>
-                                                                <span className="tooltip">Generar Video</span>
+                                                                {asset.videoLoading ? (
+                                                                    <i data-lucide="loader-2" className="w-4 h-4 text-white animate-spin"></i>
+                                                                ) : (
+                                                                    <i data-lucide="video" className="w-4 h-4 text-white"></i>
+                                                                )}
+                                                                <span className="tooltip">{asset.videoLoading ? 'Generando...' : 'Generar Video'}</span>
                                                             </button>
                                                         ) : (
                                                             <button
@@ -407,12 +412,6 @@ function App() {
                                                 </div>
                                             </div>
                                         )}
-
-                                        <div className="absolute top-2 left-2 pointer-events-none">
-                                            {asset.videoUrl && (
-                                                <div className="bg-fuchsia-500 px-2 py-0.5 rounded text-[8px] font-black text-white shadow-lg">VIDEO LISTO</div>
-                                            )}
-                                        </div>
                                     </div>
                                 ))}
                             </div>

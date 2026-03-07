@@ -52,6 +52,35 @@ function App() {
         }
     };
 
+    const callGeminiImage = async (prompt, base64Image) => {
+        try {
+            const response = await fetch('proxy.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: 'gemini-3.1-flash-image-preview',
+                    prompt: prompt,
+                    base64ImageData: base64Image.split(',')[1],
+                    mimeType: base64Image.split(';')[0].split(':')[1]
+                })
+            });
+
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+            const data = await response.json();
+            // El modelo gemini-3.1-flash-image-preview devuelve la imagen en candidates[0].content.parts
+            // Buscamos la part que tenga inlineData
+            const imagePart = data.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+            if (imagePart) {
+                return `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`;
+            }
+            throw new Error("No se recibió imagen de la IA");
+        } catch (err) {
+            console.error("Error en callGeminiImage:", err);
+            return null;
+        }
+    };
+
     const generateAds = async () => {
         if (!imagePreview || !description) return alert("Por favor, sube una imagen y describe el producto.");
 
@@ -59,49 +88,78 @@ function App() {
         setCurrentStep('processing');
 
         try {
-            // Generamos dos propuestas (A y B)
-            const proposals = ['Propuesta A', 'Propuesta B'].map(pLabel => ({
+            // Inicializar estructura vacía para que el usuario vea el contenedor
+            const emptyProposals = ['Propuesta A', 'Propuesta B'].map(pLabel => ({
                 label: pLabel,
                 assets: AD_STYLES.map(style => ({
                     id: `${style.id}_${Math.random().toString(36).substr(2, 5)}`,
                     styleId: style.id,
                     label: style.label,
-                    url: `https://picsum.photos/seed/${style.id}_${Math.random()}/800/1000`,
+                    url: null, // Se llenará progresivamente
                     prompt: `${description}. ${style.promptSuffix}`,
-                    videoUrl: null // Sin video inicial
+                    videoUrl: null,
+                    loading: true
                 }))
             }));
 
+            const batchId = Date.now();
             const fullBatch = {
-                id: Date.now(),
+                id: batchId,
                 baseImage: imagePreview,
                 timestamp: new Date().toLocaleString(),
-                proposals: proposals
+                proposals: emptyProposals
             };
 
             setResults(fullBatch);
-            setActiveProposalIdx(0);
-            setHistory(prev => [fullBatch, ...prev]);
             setCurrentStep('results');
+            setActiveProposalIdx(0);
+
+            // Generar imágenes progresivamente
+            for (let pIdx = 0; pIdx < 2; pIdx++) {
+                // Procesamos los estilos en grupos de 2 para no saturar y que sea fluido
+                for (let i = 0; i < AD_STYLES.length; i++) {
+                    const style = AD_STYLES[i];
+                    const prompt = `${description}. ${style.promptSuffix}`;
+
+                    // Llamada real a la API
+                    const imageUrl = await callGeminiImage(prompt, imagePreview);
+
+                    setResults(prev => {
+                        const updated = { ...prev };
+                        updated.proposals[pIdx].assets[i].url = imageUrl || 'https://via.placeholder.com/800x1000?text=Error+al+generar';
+                        updated.proposals[pIdx].assets[i].loading = false;
+                        return updated;
+                    });
+                }
+            }
+
+            // Actualizar historial al finalizar todo
+            setHistory(prev => [results, ...prev]);
+
         } catch (err) {
             console.error(err);
-            alert("Error al generar los anuncios. Revisa la consola.");
+            alert("Error general al generar los anuncios.");
             setCurrentStep('input');
         } finally {
             setIsGenerating(false);
         }
     };
 
-    const regenerateAsset = (proposalIdx, assetIdx) => {
+    const regenerateAsset = async (proposalIdx, assetIdx) => {
         const newResults = { ...results };
         const asset = newResults.proposals[proposalIdx].assets[assetIdx];
 
-        // Simulación de regeneración
-        asset.url = `https://picsum.photos/seed/${asset.styleId}_${Date.now()}_${Math.random()}/800/1000`;
-        asset.videoUrl = null; // Reset video if regenerated
+        asset.loading = true;
+        asset.url = null;
+        setResults({ ...newResults });
 
-        setResults(newResults);
-        // Actualizar historia (shallow copy might need deeper update in production)
+        const newUrl = await callGeminiImage(asset.prompt, results.baseImage);
+
+        asset.url = newUrl || 'https://via.placeholder.com/800x1000?text=Error+al+generar';
+        asset.loading = false;
+        asset.videoUrl = null;
+
+        setResults({ ...newResults });
         setHistory(prev => prev.map(item => item.id === results.id ? newResults : item));
     };
 
@@ -285,57 +343,64 @@ function App() {
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                                 {results.proposals[activeProposalIdx].assets.map((asset, index) => (
-                                    <div key={asset.id} className="result-card group glass overflow-hidden rounded-2xl relative">
-                                        {asset.videoUrl ? (
+                                    <div key={asset.id} className="result-card group glass overflow-hidden rounded-2xl relative min-h-[300px] flex items-center justify-center bg-white/5">
+                                        {asset.loading ? (
+                                            <div className="flex flex-col items-center gap-3">
+                                                <div className="w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
+                                                <span className="text-[10px] text-cyan-400 font-bold animate-pulse">GENERANDO...</span>
+                                            </div>
+                                        ) : asset.videoUrl ? (
                                             <video src={asset.videoUrl} className="w-full aspect-[4/5] object-cover" muted autoPlay loop />
                                         ) : (
                                             <img src={asset.url} className="w-full aspect-[4/5] object-cover cursor-zoom-in transition-transform duration-500 group-hover:scale-105" onClick={() => setLightboxItem(asset)} />
                                         )}
 
                                         {/* Overlay Controles */}
-                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-all flex flex-col justify-between p-4 pointer-events-none">
-                                            <div className="flex justify-between items-start pointer-events-auto">
-                                                <div className="bg-black/60 backdrop-blur-md px-2 py-1 rounded text-[9px] font-bold text-white/80 border border-white/10 uppercase">
-                                                    {asset.label}
-                                                </div>
-                                                <div className="flex gap-2">
-                                                    <button
-                                                        onClick={() => regenerateAsset(activeProposalIdx, index)}
-                                                        className="w-8 h-8 rounded-full bg-indigo-600/80 hover:bg-indigo-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
-                                                    >
-                                                        <i data-lucide="refresh-cw" className="w-4 h-4 text-white"></i>
-                                                        <span className="tooltip">Regenerar</span>
-                                                    </button>
-                                                    {!asset.videoUrl ? (
+                                        {!asset.loading && (
+                                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-all flex flex-col justify-between p-4 pointer-events-none">
+                                                <div className="flex justify-between items-start pointer-events-auto">
+                                                    <div className="bg-black/60 backdrop-blur-md px-2 py-1 rounded text-[9px] font-bold text-white/80 border border-white/10 uppercase">
+                                                        {asset.label}
+                                                    </div>
+                                                    <div className="flex gap-2">
                                                         <button
-                                                            onClick={() => generateVideo(activeProposalIdx, index)}
-                                                            className="w-8 h-8 rounded-full bg-fuchsia-600/80 hover:bg-fuchsia-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
+                                                            onClick={() => regenerateAsset(activeProposalIdx, index)}
+                                                            className="w-8 h-8 rounded-full bg-indigo-600/80 hover:bg-indigo-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
                                                         >
-                                                            <i data-lucide="video" className="w-4 h-4 text-white"></i>
-                                                            <span className="tooltip">Generar Video</span>
+                                                            <i data-lucide="refresh-cw" className="w-4 h-4 text-white"></i>
+                                                            <span className="tooltip">Regenerar</span>
                                                         </button>
-                                                    ) : (
+                                                        {!asset.videoUrl ? (
+                                                            <button
+                                                                onClick={() => generateVideo(activeProposalIdx, index)}
+                                                                className="w-8 h-8 rounded-full bg-fuchsia-600/80 hover:bg-fuchsia-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
+                                                            >
+                                                                <i data-lucide="video" className="w-4 h-4 text-white"></i>
+                                                                <span className="tooltip">Generar Video</span>
+                                                            </button>
+                                                        ) : (
+                                                            <button
+                                                                onClick={() => setLightboxItem(asset)}
+                                                                className="w-8 h-8 rounded-full bg-fuchsia-600/80 hover:bg-fuchsia-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
+                                                            >
+                                                                <i data-lucide="maximize" className="w-4 h-4 text-white"></i>
+                                                                <span className="tooltip">Ver Video</span>
+                                                            </button>
+                                                        )}
                                                         <button
-                                                            onClick={() => setLightboxItem(asset)}
-                                                            className="w-8 h-8 rounded-full bg-fuchsia-600/80 hover:bg-fuchsia-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
+                                                            className="w-8 h-8 rounded-full bg-cyan-600/80 hover:bg-cyan-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
                                                         >
-                                                            <i data-lucide="maximize" className="w-4 h-4 text-white"></i>
-                                                            <span className="tooltip">Ver Video</span>
+                                                            <i data-lucide="download" className="w-4 h-4 text-white"></i>
+                                                            <span className="tooltip">Descargar</span>
                                                         </button>
-                                                    )}
-                                                    <button
-                                                        className="w-8 h-8 rounded-full bg-cyan-600/80 hover:bg-cyan-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
-                                                    >
-                                                        <i data-lucide="download" className="w-4 h-4 text-white"></i>
-                                                        <span className="tooltip">Descargar</span>
-                                                    </button>
+                                                    </div>
                                                 </div>
-                                            </div>
 
-                                            <div className="flex justify-end pointer-events-auto">
-                                                {/* Espacio reservado para acciones inferiores si fueran necesarias */}
+                                                <div className="flex justify-end pointer-events-auto">
+                                                    {/* Espacio reservado para acciones inferiores si fueran necesarias */}
+                                                </div>
                                             </div>
-                                        </div>
+                                        )}
 
                                         <div className="absolute top-2 left-2 pointer-events-none">
                                             {asset.videoUrl && (

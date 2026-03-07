@@ -122,6 +122,20 @@ body {
 }
 
 /* Lightbox specific */
+.loading-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(25px);
+    /* Desenfoque más pronunciado para efecto premium */
+    z-index: 50000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 30px;
+}
+
 .lightbox {
     position: fixed;
     inset: 0;

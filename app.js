@@ -88,14 +88,14 @@ function App() {
         setCurrentStep('processing');
 
         try {
-            // Inicializar estructura vacía para que el usuario vea el contenedor
-            const emptyProposals = ['Propuesta A', 'Propuesta B'].map(pLabel => ({
+            // Inicializar estructura vacía para que el usuario vea el contenedor (Solo 1 Propuesta ahora)
+            const emptyProposals = ['Propuesta Única'].map(pLabel => ({
                 label: pLabel,
                 assets: AD_STYLES.map(style => ({
                     id: `${style.id}_${Math.random().toString(36).substr(2, 5)}`,
                     styleId: style.id,
                     label: style.label,
-                    url: null, // Se llenará progresivamente
+                    url: null,
                     prompt: `${description}. ${style.promptSuffix}`,
                     videoUrl: null,
                     loading: true
@@ -114,27 +114,27 @@ function App() {
             setCurrentStep('results');
             setActiveProposalIdx(0);
 
-            // Generar imágenes progresivamente
-            for (let pIdx = 0; pIdx < 2; pIdx++) {
-                // Procesamos los estilos en grupos de 2 para no saturar y que sea fluido
-                for (let i = 0; i < AD_STYLES.length; i++) {
-                    const style = AD_STYLES[i];
-                    const prompt = `${description}. ${style.promptSuffix}`;
+            // Generar imágenes progresivamente para la propuesta única
+            for (let i = 0; i < AD_STYLES.length; i++) {
+                const style = AD_STYLES[i];
+                const prompt = `${description}. ${style.promptSuffix}`;
 
-                    // Llamada real a la API
-                    const imageUrl = await callGeminiImage(prompt, imagePreview);
+                // Llamada real a la API
+                const imageUrl = await callGeminiImage(prompt, imagePreview);
 
-                    setResults(prev => {
-                        const updated = { ...prev };
-                        updated.proposals[pIdx].assets[i].url = imageUrl || 'https://via.placeholder.com/800x1000?text=Error+al+generar';
-                        updated.proposals[pIdx].assets[i].loading = false;
-                        return updated;
-                    });
-                }
+                setResults(prev => {
+                    const updated = JSON.parse(JSON.stringify(prev)); // Deep copy para forzar re-render
+                    updated.proposals[0].assets[i].url = imageUrl || 'https://via.placeholder.com/800x1000?text=Error+al+generar';
+                    updated.proposals[0].assets[i].loading = false;
+                    return updated;
+                });
             }
 
-            // Actualizar historial al finalizar todo
-            setHistory(prev => [results, ...prev]);
+            // Actualizar historial al finalizar todo usando el objeto FINAL
+            setResults(finalBatch => {
+                setHistory(prev => [finalBatch, ...prev]);
+                return finalBatch;
+            });
 
         } catch (err) {
             console.error(err);
@@ -247,7 +247,7 @@ function App() {
                         <div className="max-w-4xl mx-auto py-10 fade-in">
                             <div className="text-center mb-12">
                                 <h2 className="text-4xl font-bold mb-4">Transforma una foto en <span className="text-cyan-400">Todo tu Marketing</span></h2>
-                                <p className="text-white/60 text-lg">Sube la foto base de tu producto y genera <span className="text-fuchsia-400 font-bold">2 propuestas</span> completas.</p>
+                                <p className="text-white/60 text-lg">Sube la foto base de tu producto y genera una <span className="text-fuchsia-400 font-bold">Propuesta Maestra</span>.</p>
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
@@ -292,13 +292,13 @@ function App() {
                                         className="w-full py-5 rounded-2xl bg-gradient-to-r from-cyan-500 to-indigo-600 font-bold text-lg flex items-center justify-center gap-3 shadow-[0_10px_30px_rgba(6,182,212,0.3)] hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         {isGenerating ? <i data-lucide="loader-2" className="animate-spin"></i> : <i data-lucide="sparkles"></i>}
-                                        {isGenerating ? 'PROCESANDO...' : 'GENERAR 2 PROPUESTAS'}
+                                        {isGenerating ? 'PROCESANDO...' : 'GENERAR PROPUESTA MAESTRA'}
                                     </button>
 
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="glass p-4 rounded-xl flex items-center gap-3">
                                             <i data-lucide="image" className="text-cyan-400 w-5 h-5"></i>
-                                            <span className="text-xs font-semibold">16 VARIACIONES (2 sets)</span>
+                                            <span className="text-xs font-semibold">8 VARIACIONES PREMIUM</span>
                                         </div>
                                         <div className="glass p-4 rounded-xl flex items-center gap-3">
                                             <i data-lucide="video" className="text-fuchsia-400 w-5 h-5"></i>
@@ -321,18 +321,20 @@ function App() {
                                     <p className="text-white/50 text-sm">Lote: {results.timestamp}</p>
                                 </div>
 
-                                {/* Tabs de Propuestas */}
-                                <div className="flex glass p-1 rounded-xl">
-                                    {results.proposals.map((prop, idx) => (
-                                        <button
-                                            key={idx}
-                                            onClick={() => setActiveProposalIdx(idx)}
-                                            className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeProposalIdx === idx ? 'bg-cyan-500 text-white shadow-lg' : 'text-white/60 hover:text-white'}`}
-                                        >
-                                            {prop.label}
-                                        </button>
-                                    ))}
-                                </div>
+                                {/* Tabs de Propuestas - Solo si hay más de una */}
+                                {results.proposals.length > 1 && (
+                                    <div className="flex glass p-1 rounded-xl">
+                                        {results.proposals.map((prop, idx) => (
+                                            <button
+                                                key={idx}
+                                                onClick={() => setActiveProposalIdx(idx)}
+                                                className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeProposalIdx === idx ? 'bg-cyan-500 text-white shadow-lg' : 'text-white/60 hover:text-white'}`}
+                                            >
+                                                {prop.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
 
                                 <div className="flex gap-4">
                                     <button className="glass-white px-5 py-2 rounded-xl flex items-center gap-2 text-sm font-bold hover:bg-white/10" onClick={() => window.print()}>

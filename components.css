@@ -1,0 +1,557 @@
+/* ============================================
+   🎨 NEON GLASSMORPHISM - COMPONENTS
+   Componentes reutilizables
+   ============================================ */
+
+/* ═══════════════════════════════════════════════
+   GLASSMORPHISM
+   Efecto cristal con blur de fondo
+   ═══════════════════════════════════════════════ */
+.glass {
+    background: var(--card-bg);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border);
+    box-shadow: 0 8px 32px 0 var(--shadow-color);
+}
+
+/* Glass con hover animado */
+.glass-hover {
+    transition: var(--transition-main);
+}
+
+.glass-hover:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--acc);
+    transform: translateY(-5px) scale(1.01);
+    box-shadow: 0 15px 45px 0 rgba(46, 232, 255, 0.15);
+}
+
+/* Glass para modales */
+.glass-modal {
+    background: linear-gradient(145deg, rgba(15, 23, 42, 0.95), rgba(10, 15, 30, 0.98));
+    border: 1px solid rgba(148, 197, 255, 0.65);
+    box-shadow:
+        0 25px 60px rgba(0, 0, 0, 0.9),
+        0 0 0 1px rgba(56, 189, 248, 0.3),
+        0 0 60px rgba(56, 189, 248, 0.15);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+}
+
+/* ═══════════════════════════════════════════════
+   BOTONES 3D
+   Con efecto de luz deslizante
+   ═══════════════════════════════════════════════ */
+.btn-3d {
+    position: relative;
+    transition: var(--transition-main);
+    overflow: hidden;
+    z-index: 1;
+}
+
+.btn-3d::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    transition: 0.5s;
+    z-index: -1;
+}
+
+.btn-3d:hover::before {
+    left: 100%;
+}
+
+.btn-3d:active {
+    transform: scale(0.95);
+}
+
+/* ═══════════════════════════════════════════════
+   BOTÓN PRIMARIO
+   Gradiente cyan-azul
+   ═══════════════════════════════════════════════ */
+.btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 1rem 2rem;
+    background: linear-gradient(135deg, #06b6d4, #3b82f6);
+    color: white;
+    font-weight: 600;
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: var(--transition-main);
+}
+
+.btn-primary:hover {
+    background: linear-gradient(135deg, #22d3ee, #60a5fa);
+    transform: translateY(-2px);
+    box-shadow: 0 10px 30px rgba(6, 182, 212, 0.3);
+}
+
+.btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* ═══════════════════════════════════════════════
+   BOTÓN SECUNDARIO (Glass)
+   ═══════════════════════════════════════════════ */
+.btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 1rem 2rem;
+    background: var(--card-bg);
+    backdrop-filter: blur(16px);
+    color: var(--text);
+    font-weight: 500;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: var(--transition-main);
+}
+
+.btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--acc);
+}
+
+/* ═══════════════════════════════════════════════
+   CARDS INTERACTIVAS
+   Para menús de navegación tipo splash
+   ═══════════════════════════════════════════════ */
+.card-interactive {
+    position: relative;
+    padding: 3rem;
+    border-radius: var(--radius-xl);
+    text-align: left;
+    overflow: hidden;
+    cursor: pointer;
+}
+
+/* Variantes de color para cards */
+.card-interactive.purple {
+    border-color: rgba(167, 139, 250, 0.3);
+}
+
+.card-interactive.cyan {
+    border-color: rgba(34, 211, 238, 0.3);
+}
+
+.card-interactive.emerald {
+    border-color: rgba(52, 211, 153, 0.3);
+}
+
+.card-interactive.pink {
+    border-color: rgba(244, 114, 182, 0.3);
+}
+
+/* Icono de fondo decorativo */
+.card-interactive .bg-icon {
+    position: absolute;
+    top: 0;
+    right: 0;
+    padding: 2rem;
+    opacity: 0.1;
+    transform: scale(1);
+    transition: transform 0.7s ease;
+}
+
+.card-interactive:hover .bg-icon {
+    transform: scale(1.5) rotate(12deg);
+}
+
+/* Icono principal */
+.card-icon {
+    width: 4rem;
+    height: 4rem;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 1.5rem;
+}
+
+.card-icon.purple {
+    background: rgba(167, 139, 250, 0.2);
+    color: #a78bfa;
+    border: 1px solid rgba(167, 139, 250, 0.3);
+}
+
+.card-icon.cyan {
+    background: rgba(34, 211, 238, 0.2);
+    color: #22d3ee;
+    border: 1px solid rgba(34, 211, 238, 0.3);
+}
+
+.card-icon.emerald {
+    background: rgba(52, 211, 153, 0.2);
+    color: #34d399;
+    border: 1px solid rgba(52, 211, 153, 0.3);
+}
+
+/* ═══════════════════════════════════════════════
+   INPUTS
+   Campos de formulario estilizados
+   ═══════════════════════════════════════════════ */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+textarea,
+select {
+    width: 100%;
+    padding: 1rem;
+    background: rgba(15, 23, 42, 0.6) !important;
+    border: 1px solid rgba(148, 197, 255, 0.2) !important;
+    color: white !important;
+    border-radius: var(--radius-md);
+    font-family: inherit;
+    font-size: 0.875rem;
+    transition: var(--transition-main);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+    border-color: var(--acc) !important;
+    outline: none;
+    box-shadow: 0 0 0 1px var(--acc);
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: var(--muted);
+}
+
+/* Input con icono */
+.input-with-icon {
+    position: relative;
+}
+
+.input-with-icon svg {
+    position: absolute;
+    left: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--muted);
+}
+
+.input-with-icon input {
+    padding-left: 3rem;
+}
+
+/* ═══════════════════════════════════════════════
+   SEPARADOR CON TEXTO
+   "─── O accede con ───"
+   ═══════════════════════════════════════════════ */
+.divider-text {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    color: var(--muted);
+    margin: 1.5rem 0;
+}
+
+.divider-text::before,
+.divider-text::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.divider-text span {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+/* ═══════════════════════════════════════════════
+   SPINNER NEON TRIPLE (Global Premium)
+   ═══════════════════════════════════════════════ */
+.loading-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 20000;
+    background: rgba(15, 23, 42, 0.4);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 30px;
+    overflow: hidden;
+}
+
+/* Div para fondo dinámico (se establece via JS) */
+.loading-bg-image {
+    position: absolute;
+    inset: -20px;
+    background-size: cover;
+    background-position: center;
+    filter: blur(30px) brightness(0.4);
+    z-index: -1;
+    opacity: 0.7;
+    transition: opacity 0.5s ease;
+}
+
+.spinner-triple {
+    width: 120px;
+    height: 120px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.spinner-triple .ring {
+    position: absolute;
+    border-radius: 50%;
+    border: 4px solid transparent;
+}
+
+/* Aro Exterior - Cyan */
+.spinner-triple .ring-1 {
+    inset: 0;
+    border-top-color: var(--neon-cyan);
+    animation: spin 1.2s linear infinite;
+    filter: drop-shadow(0 0 8px var(--neon-cyan));
+}
+
+/* Aro Medio - Purple */
+.spinner-triple .ring-2 {
+    inset: 15px;
+    border-right-color: var(--acc2);
+    animation: spin 1.5s linear infinite reverse;
+    filter: drop-shadow(0 0 8px var(--acc2));
+}
+
+/* Aro Interior - Pink */
+.spinner-triple .ring-3 {
+    inset: 30px;
+    border-bottom-color: var(--neon-pink);
+    animation: spin 2s linear infinite;
+    filter: drop-shadow(0 0 8px var(--neon-pink));
+}
+
+.loading-text {
+    font-family: 'Montserrat', sans-serif;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: white;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    text-shadow: 0 0 15px var(--neon-cyan);
+    animation: textPulse 2s ease-in-out infinite;
+}
+
+@keyframes textPulse {
+
+    0%,
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    50% {
+        opacity: 0.7;
+        transform: scale(0.98);
+    }
+}
+
+/* Spinner básico para botones (pequeño) */
+.spinner {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 0.8;
+    }
+
+    50% {
+        opacity: 1;
+        text-shadow: 0 0 20px rgba(46, 232, 255, 0.8);
+    }
+}
+
+/* ═══════════════════════════════════════════════
+   ALERTAS / MENSAJES
+   ═══════════════════════════════════════════════ */
+.alert {
+    padding: 1rem;
+    border-radius: var(--radius-md);
+    font-size: 0.875rem;
+    margin-bottom: 1rem;
+}
+
+.alert-error {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    color: #f87171;
+}
+
+.alert-success {
+    background: rgba(34, 197, 94, 0.1);
+    border: 1px solid rgba(34, 197, 94, 0.2);
+    color: #4ade80;
+}
+
+.alert-info {
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    color: #60a5fa;
+}
+
+/* ═══════════════════════════════════════════════
+   OVERLAY / BACKDROP
+   Para modales
+   ═══════════════════════════════════════════════ */
+.overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+}
+
+/* ═══════════════════════════════════════════════
+   HISTORY ACTION BUTTONS
+   Circular icon buttons for card overlays (Download, Edit, Delete)
+   ═══════════════════════════════════════════════ */
+
+/* Base style for action buttons */
+.action-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid rgba(148, 197, 255, 0.65);
+    background: radial-gradient(circle at 0% 0%,
+            rgba(56, 189, 248, 0.16),
+            transparent 55%),
+        linear-gradient(135deg,
+            rgba(15, 23, 42, 0.98),
+            rgba(30, 64, 175, 0.95));
+    color: #e5f0ff;
+    font-size: 0.85rem;
+    cursor: pointer;
+    box-shadow:
+        0 8px 20px rgba(3, 7, 18, 0.9),
+        0 0 0 1px rgba(15, 23, 42, 1),
+        0 0 20px rgba(56, 189, 248, 0.5);
+    transition:
+        transform 0.16s ease-out,
+        box-shadow 0.16s ease-out,
+        background 0.18s ease-out;
+}
+
+.action-btn:hover {
+    transform: translateY(-2px) scale(1.1);
+    box-shadow:
+        0 12px 28px rgba(3, 7, 18, 1),
+        0 0 0 1px rgba(15, 23, 42, 1),
+        0 0 30px rgba(56, 189, 248, 0.8);
+}
+
+.action-btn:active {
+    transform: translateY(0) scale(0.95);
+}
+
+/* Download button - Cyan accent */
+.action-btn.btn-dl,
+.action-btn[data-tooltip="Descargar"] {
+    background: linear-gradient(135deg, rgba(6, 182, 212, 0.9), rgba(59, 130, 246, 0.9));
+}
+
+.action-btn.btn-dl:hover,
+.action-btn[data-tooltip="Descargar"]:hover {
+    box-shadow:
+        0 12px 28px rgba(6, 182, 212, 0.4),
+        0 0 30px rgba(6, 182, 212, 0.7);
+}
+
+/* Edit button - Amber/Orange accent */
+.action-btn.btn-edit,
+.action-btn[data-tooltip="Editar con texto"] {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.9), rgba(234, 88, 12, 0.9));
+}
+
+.action-btn.btn-edit:hover,
+.action-btn[data-tooltip="Editar con texto"]:hover {
+    box-shadow:
+        0 12px 28px rgba(245, 158, 11, 0.4),
+        0 0 30px rgba(245, 158, 11, 0.7);
+}
+
+/* Delete button - Red accent */
+.action-btn.btn-del,
+.action-btn[data-tooltip="Eliminar"] {
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.9), rgba(185, 28, 28, 0.9));
+}
+
+.action-btn.btn-del:hover,
+.action-btn[data-tooltip="Eliminar"]:hover {
+    box-shadow:
+        0 12px 28px rgba(239, 68, 68, 0.4),
+        0 0 30px rgba(239, 68, 68, 0.7);
+}
+
+/* Regenerate button - Purple accent */
+.action-btn.btn-regen,
+.action-btn[data-tooltip="Regenerar"] {
+    background: linear-gradient(135deg, rgba(168, 85, 247, 0.9), rgba(139, 92, 246, 0.9));
+}
+
+.action-btn.btn-regen:hover,
+.action-btn[data-tooltip="Regenerar"]:hover {
+    box-shadow:
+        0 12px 28px rgba(168, 85, 247, 0.4),
+        0 0 30px rgba(168, 85, 247, 0.7);
+}
+
+/* Container for overlay actions on cards */
+.overlay-actions {
+    position: absolute;
+    bottom: 0.5rem;
+    right: 0.5rem;
+    display: flex;
+    gap: 0.4rem;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.gallery-item:hover .overlay-actions {
+    opacity: 1;
+}
+
+/* ═══════════════════════════════════════════════
+   ESTÁNDAR DE EXPORTACIÓN
+   Todas las exportaciones de imágenes deben ser .jpg 
+   para máxima compatibilidad con visores de SO.
+   ═══════════════════════════════════════════════ */

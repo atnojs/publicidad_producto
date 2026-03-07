@@ -169,23 +169,37 @@ function App() {
 
     const generateVideo = async (proposalIdx, assetIdx) => {
         const currentAsset = results.proposals[proposalIdx].assets[assetIdx];
-        if (currentAsset.videoUrl || currentAsset.videoLoading) return;
 
-        // Iniciar estado de carga para el video
+        // Creamos un ID único para el nuevo campo de video
+        const newVideoId = `vid_${Date.now()}`;
+
+        // Añadimos una nueva tarjeta al final de la propuesta en estado "cargando"
         setResults(prev => {
             const updated = JSON.parse(JSON.stringify(prev));
-            updated.proposals[proposalIdx].assets[assetIdx].videoLoading = true;
+            updated.proposals[proposalIdx].assets.push({
+                id: newVideoId,
+                styleId: currentAsset.styleId,
+                label: `VIDEO: ${currentAsset.label}`,
+                url: null,
+                prompt: currentAsset.prompt,
+                videoUrl: null,
+                loading: true
+            });
             return updated;
         });
 
-        // Simulación de tiempo de espera para que la IA genere el video (ej. 4 segundos)
-        await new Promise(resolve => setTimeout(resolve, 4000));
+        // Simulación de los segundos que tarda la IA en renderizar video
+        await new Promise(resolve => setTimeout(resolve, 3500));
 
-        // Completar video
+        // Actualizamos la tarjeta de video con un video público demo infalible
         setResults(prev => {
             const updated = JSON.parse(JSON.stringify(prev));
-            updated.proposals[proposalIdx].assets[assetIdx].videoUrl = 'https://atnojs.es/recursos/demo-video-placeholder.mp4';
-            updated.proposals[proposalIdx].assets[assetIdx].videoLoading = false;
+            const vIdx = updated.proposals[proposalIdx].assets.findIndex(a => a.id === newVideoId);
+            if (vIdx !== -1) {
+                // Video MP4 público y oficial de W3Schools (NUNCA falla y es rápido)
+                updated.proposals[proposalIdx].assets[vIdx].videoUrl = 'https://www.w3schools.com/html/mov_bbb.mp4';
+                updated.proposals[proposalIdx].assets[vIdx].loading = false;
+            }
             setHistory(prevHist => prevHist.map(item => item.id === updated.id ? updated : item));
             return updated;
         });
@@ -369,25 +383,22 @@ function App() {
                                                         {asset.label}
                                                     </div>
                                                     <div className="flex gap-2">
-                                                        <button
-                                                            onClick={() => regenerateAsset(activeProposalIdx, index)}
-                                                            className="w-8 h-8 rounded-full bg-indigo-600/80 hover:bg-indigo-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
-                                                        >
-                                                            <i data-lucide="refresh-cw" className="w-4 h-4 text-white"></i>
-                                                            <span className="tooltip">Regenerar</span>
-                                                        </button>
+                                                        {!asset.videoUrl && (
+                                                            <button
+                                                                onClick={() => regenerateAsset(activeProposalIdx, index)}
+                                                                className="w-8 h-8 rounded-full bg-indigo-600/80 hover:bg-indigo-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
+                                                            >
+                                                                <i data-lucide="refresh-cw" className="w-4 h-4 text-white"></i>
+                                                                <span className="tooltip">Regenerar</span>
+                                                            </button>
+                                                        )}
                                                         {!asset.videoUrl ? (
                                                             <button
                                                                 onClick={() => generateVideo(activeProposalIdx, index)}
                                                                 className="w-8 h-8 rounded-full bg-fuchsia-600/80 hover:bg-fuchsia-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
-                                                                disabled={asset.videoLoading}
                                                             >
-                                                                {asset.videoLoading ? (
-                                                                    <i data-lucide="loader-2" className="w-4 h-4 text-white animate-spin"></i>
-                                                                ) : (
-                                                                    <i data-lucide="video" className="w-4 h-4 text-white"></i>
-                                                                )}
-                                                                <span className="tooltip">{asset.videoLoading ? 'Generando...' : 'Generar Video'}</span>
+                                                                <i data-lucide="video" className="w-4 h-4 text-white"></i>
+                                                                <span className="tooltip">Generar Video</span>
                                                             </button>
                                                         ) : (
                                                             <button

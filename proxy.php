@@ -144,10 +144,8 @@ if ($action === 'generate_video') {
     // Si hay imagen, hacemos image-to-video
     if ($imageB64 !== '') {
         $instance['image'] = [
-            'inlineData' => [
-                'mimeType' => $mime,
-                'data' => $imageB64
-            ]
+            'mimeType' => $mime,
+            'bytesBase64Encoded' => $imageB64
         ];
     }
 

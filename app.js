@@ -360,7 +360,7 @@ function App() {
 
     const confirmRegenerate = async () => {
         if (!regenerateModal) return;
-        const { proposalIdx, assetIdx, prompt } = regenerateModal;
+        const { proposalIdx, assetIdx, prompt, currentAsset } = regenerateModal;
         setRegenerateModal(null);
 
         const newResults = { ...results };
@@ -371,7 +371,11 @@ function App() {
         asset.prompt = prompt; // Actualizamos el prompt con la versión del usuario
         setResults({ ...newResults });
 
-        const newUrl = await callGeminiImage(prompt, results.baseImage);
+        const strictPrompt = prompt.trim() === ''
+            ? "Create a completely new, highly creative and visually striking product advertising variation using the reference image as inspiration."
+            : `CRITICAL INSTRUCTION: You are an expert photo retoucher. Your task is to accurately reproduce the provided reference image while applying ONLY the requested modifications. Do NOT hallucinate entirely new backgrounds, lighting, or compositions unless explicitly requested. Keep the original product perfectly intact. User requested edits: "${prompt}".`;
+
+        const newUrl = await callGeminiImage(strictPrompt, currentAsset.url);
 
         asset.url = newUrl || 'https://via.placeholder.com/800x1000?text=Error+al+generar';
         asset.loading = false;
@@ -511,9 +515,12 @@ function App() {
                         <div className="w-10 h-10 bg-gradient-to-br from-cyan-400 to-fuchsia-500 rounded-lg flex items-center justify-center shadow-[0_0_15px_rgba(34,211,238,0.5)]">
                             <i data-lucide="zap" className="text-white"></i>
                         </div>
-                        <h1 className="text-2xl font-black tracking-tighter text-white">
-                            CREATIVE <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-fuchsia-500">ENGINE</span>
-                        </h1>
+                        <div>
+                            <h1 className="text-2xl font-black tracking-tighter text-white leading-none">
+                                CREATIVE <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-fuchsia-500">ENGINE</span>
+                            </h1>
+                            <p className="text-fuchsia-400 text-sm font-medium mt-1">Publicita tus productos</p>
+                        </div>
                     </div>
                     <button className="glass-white px-4 py-2 rounded-full flex items-center gap-2 text-sm hover:bg-white/10 transition-all font-medium">
                         <i data-lucide="external-link" className="w-4 h-4"></i> Tutorial
@@ -584,7 +591,7 @@ function App() {
                                     <button onClick={() => setCurrentStep('input')} className="text-cyan-400 hover:text-cyan-300 flex items-center gap-2 mb-2 transition-all font-medium">
                                         <i data-lucide="arrow-left" className="w-4 h-4"></i> Volver a Crear
                                     </button>
-                                    <h2 className="text-2xl font-bold font-montserrat">Resultados de Campaña</h2>
+                                    <h2 className="text-2xl font-bold font-montserrat">Oferta Publicitaria</h2>
                                     <p className="text-white/50 text-sm">Lote: {results.timestamp}</p>
                                 </div>
 

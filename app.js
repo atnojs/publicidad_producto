@@ -77,25 +77,13 @@ function downloadAsset(asset) {
     var fileName = 'creative_engine_' + asset.label.replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now();
 
     if (asset.videoUrl) {
-        // Video blob URL → fetch como blob → descargar
-        fetch(asset.videoUrl)
-            .then(function (res) { return res.blob(); })
-            .then(function (blob) {
-                var url = URL.createObjectURL(blob);
-                var a = document.createElement('a');
-                a.href = url;
-                a.download = fileName + '.mp4';
-                document.body.appendChild(a);
-                a.click();
-                setTimeout(function () {
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                }, 100);
-            })
-            .catch(function (err) {
-                console.error('Error descargando video:', err);
-                alert('No se pudo descargar el vídeo.');
-            });
+        // Video blob URL -> descargar directamente
+        var a = document.createElement('a');
+        a.href = asset.videoUrl;
+        a.download = fileName + '.mp4';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
         return;
     }
 
@@ -232,6 +220,7 @@ function App() {
     const [activeProposalIdx, setActiveProposalIdx] = useState(0);
     const [lightboxItem, setLightboxItem] = useState(null);
     const [currentStep, setCurrentStep] = useState('input'); // input | processing | results
+    const [videoQualityModal, setVideoQualityModal] = useState(null); // { proposalIdx, assetIdx, currentAsset }  
 
     // Persistencia de historial con IndexedDB (sin límite de 5MB)
     const historyLoaded = useRef(false);
@@ -382,9 +371,16 @@ function App() {
 
     const [videoStatus, setVideoStatus] = useState('');
 
-    const generateVideo = async (proposalIdx, assetIdx) => {
+    const triggerVideoGeneration = (proposalIdx, assetIdx) => {
         const currentAsset = results.proposals[proposalIdx].assets[assetIdx];
         if (!currentAsset.url) return alert('No hay imagen para generar vídeo.');
+        setVideoQualityModal({ proposalIdx, assetIdx, currentAsset });
+    };
+
+    const confirmVideoGeneration = async (isStandard) => {
+        if (!videoQualityModal) return;
+        const { proposalIdx, assetIdx, currentAsset } = videoQualityModal;
+        setVideoQualityModal(null);
 
         const newVideoId = `vid_${Date.now()}`;
 
@@ -404,11 +400,6 @@ function App() {
         });
 
         try {
-            const isStandard = window.confirm(
-                "¿Deseas generar el vídeo en ALTA CALIDAD?\n\n" +
-                "[ ACEPTAR ] : Calidad Standard (Máximo detalle, ~ $0.40/seg)\n" +
-                "[ CANCELAR ] : Calidad Fast (Más rápido y barato, ~ $0.15/seg)"
-            );
             const selectedModel = isStandard ? 'veo-3.1-generate-preview' : 'veo-3.1-fast-generate-preview';
 
             const videoPrompt = 'Smooth cinematic product video, subtle motion, professional lighting, slow elegant movement, commercial quality. ' + (currentAsset.prompt || '');
@@ -635,7 +626,7 @@ function App() {
                                                         )}
                                                         {!asset.videoUrl ? (
                                                             <button
-                                                                onClick={() => generateVideo(activeProposalIdx, index)}
+                                                                onClick={() => triggerVideoGeneration(activeProposalIdx, index)}
                                                                 className="w-8 h-8 rounded-full bg-fuchsia-600/80 hover:bg-fuchsia-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
                                                             >
                                                                 <i data-lucide="video" className="w-4 h-4 text-white"></i>
@@ -696,6 +687,63 @@ function App() {
                             onClick={() => setLightboxItem(null)}
                         >
                             <i data-lucide="x" className="w-8 h-8"></i>
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal de Calidad de Vídeo */}
+            {videoQualityModal && (
+                <div className="lightbox flex items-center justify-center fade-in z-50 p-4" onClick={() => setVideoQualityModal(null)}>
+                    <div className="glass-white p-8 rounded-2xl max-w-md w-full relative" onClick={e => e.stopPropagation()}>
+                        <button className="absolute top-4 right-4 text-white/50 hover:text-white" onClick={() => setVideoQualityModal(null)}>
+                            <i data-lucide="x" className="w-5 h-5"></i>
+                        </button>
+
+                        <div className="flex justify-center mb-6">
+                            <div className="w-16 h-16 rounded-full bg-fuchsia-500/20 flex items-center justify-center">
+                                <i data-lucide="video" className="w-8 h-8 text-fuchsia-400"></i>
+                            </div>
+                        </div>
+
+                        <h3 className="text-2xl font-bold font-montserrat text-center mb-2">Generar Vídeo con Veo 3.1</h3>
+                        <p className="text-white/70 text-center mb-8 text-sm">Escoge la calidad y coste de generación para darle vida a este anuncio.</p>
+
+                        <div className="space-y-4">
+                            <button
+                                onClick={() => confirmVideoGeneration(true)}
+                                className="w-full flex items-center justify-between p-4 rounded-xl border border-fuchsia-500/50 bg-fuchsia-500/10 hover:bg-fuchsia-500/20 transition-all group"
+                            >
+                                <div className="text-left">
+                                    <div className="font-bold flex items-center gap-2 text-fuchsia-400">
+                                        <i data-lucide="sparkles" className="w-4 h-4"></i>
+                                        Calidad Standard
+                                    </div>
+                                    <div className="text-xs text-white/60 mt-1">Máximo detalle y calidad visual. Recomendado para entrega final.</div>
+                                </div>
+                                <div className="font-mono font-bold text-fuchsia-300">~$0.40/s</div>
+                            </button>
+
+                            <button
+                                onClick={() => confirmVideoGeneration(false)}
+                                className="w-full flex items-center justify-between p-4 rounded-xl border border-cyan-500/50 bg-cyan-500/10 hover:bg-cyan-500/20 transition-all group"
+                            >
+                                <div className="text-left">
+                                    <div className="font-bold flex items-center gap-2 text-cyan-400">
+                                        <i data-lucide="zap" className="w-4 h-4"></i>
+                                        Calidad Fast
+                                    </div>
+                                    <div className="text-xs text-white/60 mt-1">Más rápido y económico. Ideal para iteraciones y experimentación.</div>
+                                </div>
+                                <div className="font-mono font-bold text-cyan-300">~$0.15/s</div>
+                            </button>
+                        </div>
+
+                        <button
+                            onClick={() => setVideoQualityModal(null)}
+                            className="w-full mt-6 py-3 rounded-xl border border-white/10 hover:bg-white/5 transition-all font-bold text-sm text-white/60 hover:text-white"
+                        >
+                            Cancelar
                         </button>
                     </div>
                 </div>

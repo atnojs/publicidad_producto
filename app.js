@@ -1,4 +1,4 @@
-const { useState, useEffect, useRef } = React;
+const { useState, useEffect, useRef, useCallback } = React;
 
 // Configuración de estilos para la IA
 const AD_STYLES = [
@@ -12,7 +12,148 @@ const AD_STYLES = [
     { id: 'empaque', label: 'Empaque Premium', icon: 'package', promptSuffix: "producto exhibido con su empaque premium, sensación de experiencia unboxing, presentación de lujo" }
 ];
 
-const STORAGE_KEY = 'creative_ads_engine_history';
+const DB_NAME = 'creative_ads_engine_db';
+const DB_STORE = 'history';
+const DB_VERSION = 1;
+
+// ─── IndexedDB Helpers ───────────────────────────────────────
+function openDB() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains(DB_STORE)) {
+                db.createObjectStore(DB_STORE, { keyPath: 'id' });
+            }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+async function loadHistoryFromDB() {
+    try {
+        const db = await openDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(DB_STORE, 'readonly');
+            const store = tx.objectStore(DB_STORE);
+            const req = store.getAll();
+            req.onsuccess = () => {
+                const items = req.result || [];
+                items.sort((a, b) => b.id - a.id);
+                resolve(items);
+            };
+            req.onerror = () => reject(req.error);
+        });
+    } catch (e) {
+        console.warn('Error cargando historial de IndexedDB:', e);
+        return [];
+    }
+}
+
+async function saveHistoryToDB(historyArray) {
+    try {
+        const db = await openDB();
+        const tx = db.transaction(DB_STORE, 'readwrite');
+        const store = tx.objectStore(DB_STORE);
+        store.clear();
+        historyArray.forEach(item => store.put(item));
+        return new Promise((resolve, reject) => {
+            tx.oncomplete = resolve;
+            tx.onerror = () => reject(tx.error);
+        });
+    } catch (e) {
+        console.warn('Error guardando historial en IndexedDB:', e);
+    }
+}
+
+// ─── Download Helper ─────────────────────────────────────────
+function downloadAsset(asset) {
+    const fileName = `creative_engine_${asset.label.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`;
+
+    if (asset.videoUrl) {
+        // Si es un blob URL o data URL de video
+        const a = document.createElement('a');
+        a.href = asset.videoUrl;
+        a.download = `${fileName}.webm`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        return;
+    }
+
+    if (asset.url) {
+        // Imagen base64 → descarga directa
+        const a = document.createElement('a');
+        a.href = asset.url;
+        a.download = `${fileName}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    }
+}
+
+// ─── Ken Burns Video Generator ───────────────────────────────
+function createKenBurnsVideo(imageUrl) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+            const W = 720;
+            const H = 900;
+            const DURATION = 4; // seconds
+            const FPS = 30;
+            const TOTAL_FRAMES = DURATION * FPS;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = W;
+            canvas.height = H;
+            const ctx = canvas.getContext('2d');
+
+            const stream = canvas.captureStream(FPS);
+            const recorder = new MediaRecorder(stream, {
+                mimeType: 'video/webm;codecs=vp9',
+                videoBitsPerSecond: 2500000
+            });
+            const chunks = [];
+            recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+            recorder.onstop = () => {
+                const blob = new Blob(chunks, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                resolve(url);
+            };
+            recorder.onerror = (e) => reject(e);
+            recorder.start();
+
+            let frame = 0;
+            function drawFrame() {
+                const progress = frame / TOTAL_FRAMES;
+                // Ken Burns: slow zoom in + slight pan
+                const scale = 1 + progress * 0.15; // zoom from 1.0 to 1.15
+                const panX = progress * 30;  // pan right slightly
+                const panY = progress * 20;  // pan down slightly
+
+                const sw = img.width / scale;
+                const sh = img.height / scale;
+                const sx = panX * (img.width / W);
+                const sy = panY * (img.height / H);
+
+                ctx.clearRect(0, 0, W, H);
+                ctx.drawImage(img, sx, sy, sw, sh, 0, 0, W, H);
+
+                frame++;
+                if (frame <= TOTAL_FRAMES) {
+                    requestAnimationFrame(drawFrame);
+                } else {
+                    recorder.stop();
+                }
+            }
+            drawFrame();
+        };
+        img.onerror = () => reject(new Error('No se pudo cargar la imagen para el vídeo'));
+        img.src = imageUrl;
+    });
+}
 
 function App() {
     const [image, setImage] = useState(null);
@@ -25,20 +166,18 @@ function App() {
     const [lightboxItem, setLightboxItem] = useState(null);
     const [currentStep, setCurrentStep] = useState('input'); // input | processing | results
 
-    // Persistencia de historial
+    // Persistencia de historial con IndexedDB (sin límite de 5MB)
+    const historyLoaded = useRef(false);
     useEffect(() => {
-        try {
-            const saved = localStorage.getItem(STORAGE_KEY);
-            if (saved) setHistory(JSON.parse(saved));
-        } catch (e) { console.error("Error cargando historial", e); }
+        loadHistoryFromDB().then(saved => {
+            if (saved.length > 0) setHistory(saved);
+            historyLoaded.current = true;
+        });
     }, []);
 
     useEffect(() => {
-        try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
-        } catch (e) {
-            console.warn("No se pudo guardar el historial completo en localStorage (las imágenes base64 superan los 5MB permitidos por el navegador). Las imágenes se mantendrán en esta sesión.");
-        }
+        if (!historyLoaded.current) return; // No guardar hasta haber cargado
+        saveHistoryToDB(history);
     }, [history]);
 
     // Refrescar iconos Lucide
@@ -169,6 +308,7 @@ function App() {
 
     const generateVideo = async (proposalIdx, assetIdx) => {
         const currentAsset = results.proposals[proposalIdx].assets[assetIdx];
+        if (!currentAsset.url) return alert('No hay imagen para generar vídeo.');
 
         // Creamos un ID único para el nuevo campo de video
         const newVideoId = `vid_${Date.now()}`;
@@ -188,21 +328,31 @@ function App() {
             return updated;
         });
 
-        // Simulación de los segundos que tarda la IA en renderizar video
-        await new Promise(resolve => setTimeout(resolve, 3500));
+        try {
+            // Generar vídeo real con Ken Burns (Canvas + MediaRecorder)
+            const videoUrl = await createKenBurnsVideo(currentAsset.url);
 
-        // Actualizamos la tarjeta de video con un video público demo infalible
-        setResults(prev => {
-            const updated = JSON.parse(JSON.stringify(prev));
-            const vIdx = updated.proposals[proposalIdx].assets.findIndex(a => a.id === newVideoId);
-            if (vIdx !== -1) {
-                // Video MP4 público y oficial de W3Schools (NUNCA falla y es rápido)
-                updated.proposals[proposalIdx].assets[vIdx].videoUrl = 'https://www.w3schools.com/html/mov_bbb.mp4';
-                updated.proposals[proposalIdx].assets[vIdx].loading = false;
-            }
-            setHistory(prevHist => prevHist.map(item => item.id === updated.id ? updated : item));
-            return updated;
-        });
+            // Actualizamos la tarjeta de video con el blob URL real
+            setResults(prev => {
+                const updated = JSON.parse(JSON.stringify(prev));
+                const vIdx = updated.proposals[proposalIdx].assets.findIndex(a => a.id === newVideoId);
+                if (vIdx !== -1) {
+                    updated.proposals[proposalIdx].assets[vIdx].videoUrl = videoUrl;
+                    updated.proposals[proposalIdx].assets[vIdx].loading = false;
+                }
+                setHistory(prevHist => prevHist.map(item => item.id === updated.id ? updated : item));
+                return updated;
+            });
+        } catch (err) {
+            console.error('Error generando vídeo:', err);
+            // Eliminar la tarjeta de vídeo fallida
+            setResults(prev => {
+                const updated = JSON.parse(JSON.stringify(prev));
+                updated.proposals[proposalIdx].assets = updated.proposals[proposalIdx].assets.filter(a => a.id !== newVideoId);
+                return updated;
+            });
+            alert('No se pudo generar el vídeo. Inténtalo de nuevo.');
+        }
     };
 
     const deleteHistoryItem = (id) => {
@@ -355,8 +505,11 @@ function App() {
                                 )}
 
                                 <div className="flex gap-4">
-                                    <button className="glass-white px-5 py-2 rounded-xl flex items-center gap-2 text-sm font-bold hover:bg-white/10" onClick={() => window.print()}>
-                                        <i data-lucide="download-cloud" className="w-4 h-4"></i> Exportar
+                                    <button className="glass-white px-5 py-2 rounded-xl flex items-center gap-2 text-sm font-bold hover:bg-white/10" onClick={() => {
+                                        const assets = results.proposals[activeProposalIdx].assets.filter(a => !a.loading && (a.url || a.videoUrl));
+                                        assets.forEach((asset, i) => setTimeout(() => downloadAsset(asset), i * 300));
+                                    }}>
+                                        <i data-lucide="download-cloud" className="w-4 h-4"></i> Exportar Todo
                                     </button>
                                 </div>
                             </div>
@@ -410,6 +563,7 @@ function App() {
                                                             </button>
                                                         )}
                                                         <button
+                                                            onClick={() => downloadAsset(asset)}
                                                             className="w-8 h-8 rounded-full bg-cyan-600/80 hover:bg-cyan-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
                                                         >
                                                             <i data-lucide="download" className="w-4 h-4 text-white"></i>

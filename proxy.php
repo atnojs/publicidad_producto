@@ -74,9 +74,12 @@ function make_request($url, $method = 'GET', $headers = [], $body = null)
     $context = stream_context_create($opts);
     $response = file_get_contents($url, false, $context);
 
-    $status_line = $http_response_header[0];
-    preg_match('{HTTP\/\S*\s(\d{3})}', $status_line, $match);
-    $status = $match[1];
+    $status = 0;
+    foreach ($http_response_header as $h) {
+        if (preg_match('{^HTTP\/\S*\s(\d{3})}', $h, $match)) {
+            $status = (int)$match[1];
+        }
+    }
 
     // Devolver formato de los headers igual a cURL
     $contentType = 'application/json';
@@ -208,9 +211,12 @@ if ($action === 'download_video') {
     $context = stream_context_create($opts);
     $videoBytes = file_get_contents($downloadUrl, false, $context);
 
-    $status_line = $http_response_header[0];
-    preg_match('{HTTP\/\S*\s(\d{3})}', $status_line, $match);
-    $status = (int)$match[1];
+    $status = 0;
+    foreach ($http_response_header as $h) {
+        if (preg_match('{^HTTP\/\S*\s(\d{3})}', $h, $match)) {
+            $status = (int)$match[1];
+        }
+    }
 
     $contentType = 'video/mp4';
     foreach ($http_response_header as $h) {

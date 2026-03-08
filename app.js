@@ -123,7 +123,7 @@ function downloadAsset(asset) {
 }
 
 // ─── Veo Video Generator (IA real) ──────────────────────────
-function generateVideoWithVeo(imageDataUrl, prompt, onStatus) {
+function generateVideoWithVeo(imageDataUrl, prompt, modelName, onStatus) {
     var parts = imageDataUrl.split(',');
     var meta = parts[0];
     var base64Data = parts[1];
@@ -136,7 +136,7 @@ function generateVideoWithVeo(imageDataUrl, prompt, onStatus) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             action: 'generate_video',
-            model: 'veo-3.1-generate-preview',
+            model: modelName || 'veo-3.1-generate-preview',
             prompt: prompt,
             base64ImageData: base64Data,
             mimeType: mimeType,
@@ -404,11 +404,19 @@ function App() {
         });
 
         try {
+            const isStandard = window.confirm(
+                "¿Deseas generar el vídeo en ALTA CALIDAD?\n\n" +
+                "[ ACEPTAR ] : Calidad Standard (Máximo detalle, ~ $0.40/seg)\n" +
+                "[ CANCELAR ] : Calidad Fast (Más rápido y barato, ~ $0.15/seg)"
+            );
+            const selectedModel = isStandard ? 'veo-3.1-generate-preview' : 'veo-3.1-fast-generate-preview';
+
             const videoPrompt = 'Smooth cinematic product video, subtle motion, professional lighting, slow elegant movement, commercial quality. ' + (currentAsset.prompt || '');
 
             const videoUrl = await generateVideoWithVeo(
                 currentAsset.url,
                 videoPrompt,
+                selectedModel,
                 function (status) { setVideoStatus(status); }
             );
 

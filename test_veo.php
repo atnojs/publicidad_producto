@@ -1,5 +1,5 @@
 <?php
-$API_KEY = getenv('GEMINI_API_KEY');
+$API_KEY = getenv('GEMINI_API_KEY') ?: getenv('A');
 if (!$API_KEY)
     die("No API KEY\n");
 
@@ -16,17 +16,20 @@ $payload = [
     ]
 ];
 
-$ch = curl_init($url);
-curl_setopt_array($ch, [
-    CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_POST => true,
-    CURLOPT_HTTPHEADER => [
-        "Content-Type: application/json",
-        "x-goog-api-key: {$API_KEY}"
-    ],
-    CURLOPT_POSTFIELDS => json_encode($payload)
-]);
-$res = curl_exec($ch);
-$code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-echo "HTTP $code\n";
+$opts = [
+    'http' => [
+        'method' => 'POST',
+        'header' => "Content-Type: application/json\r\n" .
+        "x-goog-api-key: {$API_KEY}\r\n",
+        'content' => json_encode($payload),
+        'ignore_errors' => true
+    ]
+];
+
+$context = stream_context_create($opts);
+$res = file_get_contents($url, false, $context);
+
+$status_line = $http_response_header[0];
+echo "HTTP Status: $status_line\n";
+echo "Response Body:\n";
 echo $res . "\n";

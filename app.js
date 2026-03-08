@@ -145,11 +145,18 @@ function generateVideoWithVeo(imageDataUrl, prompt, onStatus) {
     })
         .then(function (res) {
             if (!res.ok) {
-                return res.json().then(function (d) {
-                    var errMsg = d.error;
-                    if (typeof errMsg === 'object') errMsg = JSON.stringify(errMsg);
-                    throw new Error(errMsg || 'Error HTTP ' + res.status);
-                }).catch(function () { throw new Error('Error HTTP ' + res.status); });
+                return res.text().then(function (text) {
+                    var errMsg = 'Error HTTP ' + res.status;
+                    try {
+                        var d = JSON.parse(text);
+                        if (d.error) {
+                            errMsg = typeof d.error === 'object' ? JSON.stringify(d.error) : d.error;
+                        }
+                    } catch (e) {
+                        errMsg = text || errMsg;
+                    }
+                    throw new Error(errMsg);
+                });
             }
             return res.json();
         })

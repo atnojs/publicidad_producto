@@ -159,6 +159,11 @@ if ($action === 'generate_video') {
     ];
 
     $res = make_request($endpoint, 'POST', ["x-goog-api-key: {$API_KEY}"], $payload);
+
+    if ($res['status'] !== 200) {
+        file_put_contents('logs.txt', date('Y-m-d H:i:s') . "\nEndpoint: $endpoint\nPayload: " . json_encode($payload) . "\nStatus: " . $res['status'] . "\nResponse: " . $res['body'] . "\n\n", FILE_APPEND);
+    }
+
     http_response_code($res['status']);
     header('Content-Type: ' . $res['contentType']);
     echo $res['body'];

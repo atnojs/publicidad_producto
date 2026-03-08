@@ -111,7 +111,7 @@ function downloadAsset(asset) {
 }
 
 // ─── Veo Video Generator (IA real) ──────────────────────────
-function generateVideoWithVeo(imageDataUrl, prompt, modelName, onStatus) {
+function generateVideoWithVeo(imageDataUrl, prompt, modelName, generateAudio, onStatus) {
     var parts = imageDataUrl.split(',');
     var meta = parts[0];
     var base64Data = parts[1];
@@ -128,7 +128,8 @@ function generateVideoWithVeo(imageDataUrl, prompt, modelName, onStatus) {
             prompt: prompt,
             base64ImageData: base64Data,
             mimeType: mimeType,
-            aspectRatio: '9:16'
+            aspectRatio: '9:16',
+            generateAudio: generateAudio
         })
     })
         .then(function (res) {
@@ -220,7 +221,8 @@ function App() {
     const [activeProposalIdx, setActiveProposalIdx] = useState(0);
     const [lightboxItem, setLightboxItem] = useState(null);
     const [currentStep, setCurrentStep] = useState('input'); // input | processing | results
-    const [videoQualityModal, setVideoQualityModal] = useState(null); // { proposalIdx, assetIdx, currentAsset }  
+    const [videoQualityModal, setVideoQualityModal] = useState(null); // { proposalIdx, assetIdx, currentAsset, prompt, audioPrompt, generateAudio }  
+    const [regenerateModal, setRegenerateModal] = useState(null); // { proposalIdx, assetIdx, currentAsset, prompt }
 
     // Persistencia de historial con IndexedDB (sin límite de 5MB)
     const historyLoaded = useRef(false);
@@ -351,15 +353,25 @@ function App() {
         }
     };
 
-    const regenerateAsset = async (proposalIdx, assetIdx) => {
+    const triggerRegenerate = (proposalIdx, assetIdx) => {
+        const currentAsset = results.proposals[proposalIdx].assets[assetIdx];
+        setRegenerateModal({ proposalIdx, assetIdx, currentAsset, prompt: currentAsset.prompt || '' });
+    };
+
+    const confirmRegenerate = async () => {
+        if (!regenerateModal) return;
+        const { proposalIdx, assetIdx, prompt } = regenerateModal;
+        setRegenerateModal(null);
+
         const newResults = { ...results };
         const asset = newResults.proposals[proposalIdx].assets[assetIdx];
 
         asset.loading = true;
         asset.url = null;
+        asset.prompt = prompt; // Actualizamos el prompt con la versión del usuario
         setResults({ ...newResults });
 
-        const newUrl = await callGeminiImage(asset.prompt, results.baseImage);
+        const newUrl = await callGeminiImage(prompt, results.baseImage);
 
         asset.url = newUrl || 'https://via.placeholder.com/800x1000?text=Error+al+generar';
         asset.loading = false;
@@ -374,12 +386,19 @@ function App() {
     const triggerVideoGeneration = (proposalIdx, assetIdx) => {
         const currentAsset = results.proposals[proposalIdx].assets[assetIdx];
         if (!currentAsset.url) return alert('No hay imagen para generar vídeo.');
-        setVideoQualityModal({ proposalIdx, assetIdx, currentAsset });
+        setVideoQualityModal({
+            proposalIdx,
+            assetIdx,
+            currentAsset,
+            prompt: currentAsset.prompt || '',
+            audioPrompt: '',
+            generateAudio: false
+        });
     };
 
     const confirmVideoGeneration = async (isStandard) => {
         if (!videoQualityModal) return;
-        const { proposalIdx, assetIdx, currentAsset } = videoQualityModal;
+        const { proposalIdx, assetIdx, currentAsset, prompt, audioPrompt, generateAudio } = videoQualityModal;
         setVideoQualityModal(null);
 
         const newVideoId = `vid_${Date.now()}`;
@@ -392,7 +411,7 @@ function App() {
                 styleId: currentAsset.styleId,
                 label: `VIDEO: ${currentAsset.label}`,
                 url: currentAsset.url,
-                prompt: currentAsset.prompt,
+                prompt: prompt, // Actualizamos con la nueva instrucción visual
                 videoUrl: null,
                 loading: true
             });
@@ -402,12 +421,14 @@ function App() {
         try {
             const selectedModel = isStandard ? 'veo-3.1-generate-preview' : 'veo-3.1-fast-generate-preview';
 
-            const videoPrompt = 'Smooth cinematic product video, subtle motion, professional lighting, slow elegant movement, commercial quality. ' + (currentAsset.prompt || '');
+            // Componemos el super-prompt uniendo lo visual y lo auditivo
+            const videoPrompt = `Smooth cinematic product video, subtle motion, professional lighting, slow elegant movement, commercial quality. ${prompt} ${generateAudio && audioPrompt ? ' || Audio Instructions: ' + audioPrompt : ''}`;
 
             const videoUrl = await generateVideoWithVeo(
                 currentAsset.url,
                 videoPrompt,
                 selectedModel,
+                generateAudio,
                 function (status) { setVideoStatus(status); }
             );
 
@@ -617,7 +638,7 @@ function App() {
                                                     <div className="flex gap-2">
                                                         {!asset.videoUrl && (
                                                             <button
-                                                                onClick={() => regenerateAsset(activeProposalIdx, index)}
+                                                                onClick={() => triggerRegenerate(activeProposalIdx, index)}
                                                                 className="w-8 h-8 rounded-full bg-indigo-600/80 hover:bg-indigo-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
                                                             >
                                                                 <i data-lucide="refresh-cw" className="w-4 h-4 text-white"></i>
@@ -707,9 +728,42 @@ function App() {
                         </div>
 
                         <h3 className="text-2xl font-bold font-montserrat text-center mb-2">Generar Vídeo con Veo 3.1</h3>
-                        <p className="text-white/70 text-center mb-8 text-sm">Escoge la calidad y coste de generación para darle vida a este anuncio.</p>
+                        <p className="text-white/70 text-center mb-6 text-sm">Añade instrucciones para dirigir a la IA Veo sobre el encuadre o movimiento. Puedes habilitar sonido sincronizado también.</p>
 
-                        <div className="space-y-4">
+                        <div className="mb-4">
+                            <label className="text-xs font-bold text-white/50 uppercase tracking-widest mb-2 block">Prompt Visual de Vídeo</label>
+                            <textarea
+                                value={videoQualityModal.prompt}
+                                onChange={e => setVideoQualityModal({ ...videoQualityModal, prompt: e.target.value })}
+                                className="w-full bg-black/40 border border-white/20 rounded-xl p-3 h-[80px] focus:outline-none focus:border-fuchsia-400 text-white text-sm resize-none"
+                                placeholder="Describe el movimiento de cámara, los efectos..."
+                            />
+                        </div>
+
+                        <div className="mb-6">
+                            <label className="flex items-center gap-3 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={videoQualityModal.generateAudio}
+                                    onChange={e => setVideoQualityModal({ ...videoQualityModal, generateAudio: e.target.checked })}
+                                    className="w-5 h-5 rounded border-white/20 bg-black/40 text-fuchsia-500 focus:ring-fuchsia-500 focus:ring-offset-gray-900"
+                                />
+                                <span className="text-sm font-bold text-white/90">Generar Audio Sincronizado</span>
+                            </label>
+
+                            {videoQualityModal.generateAudio && (
+                                <div className="mt-3 animate-fade-in fade-in">
+                                    <textarea
+                                        value={videoQualityModal.audioPrompt}
+                                        onChange={e => setVideoQualityModal({ ...videoQualityModal, audioPrompt: e.target.value })}
+                                        className="w-full bg-black/40 border border-fuchsia-500/30 rounded-xl p-3 h-[60px] focus:outline-none focus:border-fuchsia-400 text-fuchsia-100 text-sm resize-none"
+                                        placeholder="Sonido de ambiente, locución, efectos de sonido exactos..."
+                                    />
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="space-y-3">
                             <button
                                 onClick={() => confirmVideoGeneration(true)}
                                 className="w-full flex items-center justify-between p-4 rounded-xl border border-fuchsia-500/50 bg-fuchsia-500/10 hover:bg-fuchsia-500/20 transition-all group"
@@ -745,6 +799,52 @@ function App() {
                         >
                             Cancelar
                         </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal de Regeneración de Imagen con Prompt */}
+            {regenerateModal && (
+                <div className="lightbox flex items-center justify-center fade-in z-50 p-4" onClick={() => setRegenerateModal(null)}>
+                    <div className="glass-white p-8 rounded-2xl max-w-md w-full relative" onClick={e => e.stopPropagation()}>
+                        <button className="absolute top-4 right-4 text-white/50 hover:text-white" onClick={() => setRegenerateModal(null)}>
+                            <i data-lucide="x" className="w-5 h-5"></i>
+                        </button>
+
+                        <div className="flex justify-center mb-6">
+                            <div className="w-16 h-16 rounded-full bg-indigo-500/20 flex items-center justify-center">
+                                <i data-lucide="refresh-cw" className="w-8 h-8 text-indigo-400"></i>
+                            </div>
+                        </div>
+
+                        <h3 className="text-2xl font-bold font-montserrat text-center mb-2">Regenerar Imagen</h3>
+                        <p className="text-white/70 text-center mb-6 text-sm">Modifica o añade instrucciones al prompt para guiar a la IA en esta nueva versión.</p>
+
+                        <textarea
+                            value={regenerateModal.prompt}
+                            onChange={e => setRegenerateModal({ ...regenerateModal, prompt: e.target.value })}
+                            className="w-full bg-black/40 border border-white/20 rounded-xl p-4 min-h-[120px] focus:outline-none focus:border-indigo-400 text-white text-sm mb-6 resize-none"
+                            placeholder="Describe cómo quieres que se vea..."
+                        />
+
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setRegenerateModal(null)}
+                                className="flex-1 py-3 rounded-xl border border-white/10 hover:bg-white/5 transition-all text-sm font-bold text-white/70 hover:text-white"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={() => {
+                                    /* El estado de loading indica a React que empiece; el botón debe dispararlo y cerrarse solo si hay confirmación, confirmRegenerate hace exactamente eso. */
+                                    confirmRegenerate();
+                                }}
+                                className="flex-1 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 transition-all text-sm font-bold shadow-lg shadow-indigo-500/30 flex items-center justify-center gap-2"
+                            >
+                                <i data-lucide="wand-2" className="w-4 h-4"></i>
+                                Generar
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

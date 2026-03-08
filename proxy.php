@@ -162,7 +162,7 @@ if ($action === 'generate_video') {
     if (isset($req['generateAudio']) && $req['generateAudio'] === true) {
         $audioPromptExt = isset($req['audioPrompt']) && trim($req['audioPrompt']) !== '' ? "\n[AUDIO REQUIREMENT]: " . trim($req['audioPrompt']) . "\n" : "";
         $payload['instances'][0]['prompt'] .= $audioPromptExt;
-        $payload['parameters']['generateAudio'] = true;
+    // The 'generateAudio' parameter is intentionally not sent here as it's unsupported by the current Veo model endpoint and causes a 400 error.
     }
 
     $res = make_request($endpoint, 'POST', ["x-goog-api-key: {$API_KEY}"], $payload);

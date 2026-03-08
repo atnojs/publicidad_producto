@@ -364,32 +364,35 @@ function App() {
         const { proposalIdx, assetIdx, prompt, currentAsset } = regenerateModal;
         setRegenerateModal(null);
 
-        const newResults = { ...results };
+        const originalUrl = currentAsset.url;
+
+        // Clone prevent reference mutation
+        const newResults = JSON.parse(JSON.stringify(results));
         const asset = newResults.proposals[proposalIdx].assets[assetIdx];
 
         asset.loading = true;
         asset.url = null;
         asset.prompt = prompt; // Actualizamos el prompt con la versión del usuario
-        setResults({ ...newResults });
+        setResults(newResults);
 
         const strictPrompt = prompt.trim() === ''
             ? "Create a completely new, highly creative and visually striking product advertising variation using the reference image as inspiration."
             : `CRITICAL INSTRUCTION: You are an expert photo retoucher. Your task is to accurately reproduce the provided reference image while applying ONLY the requested modifications. Do NOT hallucinate entirely new backgrounds, lighting, or compositions unless explicitly requested. Keep the original product perfectly intact. User requested edits: "${prompt}".`;
 
-        const newUrl = await callGeminiImage(strictPrompt, currentAsset.url);
+        const newUrl = await callGeminiImage(strictPrompt, originalUrl);
 
         if (newUrl) {
             asset.url = newUrl;
         } else {
             console.error("Regeneration failed, reverting to previous image.");
-            asset.url = currentAsset.url;
+            asset.url = originalUrl;
             alert('Falló la regeneración de la imagen. Por favor, intenta de nuevo.');
         }
 
         asset.loading = false;
         asset.videoUrl = null;
 
-        setResults({ ...newResults });
+        setResults(newResults);
         setHistory(prev => prev.map(item => item.id === results.id ? newResults : item));
     };
 
@@ -758,6 +761,31 @@ function App() {
                                 className="w-full bg-black/40 border border-white/20 rounded-xl p-3 h-[80px] focus:outline-none focus:border-fuchsia-400 text-white text-sm resize-none"
                                 placeholder="Describe el movimiento de cámara, los efectos..."
                             />
+                        </div>
+
+                        <div className="mb-6">
+                            <label className="text-xs font-bold text-white/50 uppercase tracking-widest mb-2 flex items-center gap-2">
+                                <i data-lucide="music" className="w-4 h-4"></i>
+                                Audio del Vídeo (Opcional)
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer mb-3">
+                                <input
+                                    type="checkbox"
+                                    checked={videoQualityModal.generateAudio}
+                                    onChange={e => setVideoQualityModal({ ...videoQualityModal, generateAudio: e.target.checked })}
+                                    className="accent-fuchsia-500 w-4 h-4 cursor-pointer"
+                                />
+                                <span className="text-sm text-white/80 select-none">Generar pista de audio con IA</span>
+                            </label>
+
+                            {videoQualityModal.generateAudio && (
+                                <textarea
+                                    value={videoQualityModal.audioPrompt}
+                                    onChange={e => setVideoQualityModal({ ...videoQualityModal, audioPrompt: e.target.value })}
+                                    className="w-full bg-black/40 border border-white/20 rounded-xl p-3 h-[60px] focus:outline-none focus:border-fuchsia-400 text-white text-sm resize-none fade-in"
+                                    placeholder="Describe la música, efectos sonoros o estilo de audio..."
+                                />
+                            )}
                         </div>
 
                         <div className="space-y-3">

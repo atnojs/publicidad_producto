@@ -18,125 +18,159 @@ const DB_VERSION = 1;
 
 // ─── IndexedDB Helpers ───────────────────────────────────────
 function openDB() {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
-        request.onupgradeneeded = (e) => {
-            const db = e.target.result;
+    return new Promise(function (resolve, reject) {
+        var request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onupgradeneeded = function (e) {
+            var db = e.target.result;
             if (!db.objectStoreNames.contains(DB_STORE)) {
                 db.createObjectStore(DB_STORE, { keyPath: 'id' });
             }
         };
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
+        request.onsuccess = function () { resolve(request.result); };
+        request.onerror = function () { reject(request.error); };
     });
 }
 
-async function loadHistoryFromDB() {
-    try {
-        const db = await openDB();
-        return new Promise((resolve, reject) => {
-            const tx = db.transaction(DB_STORE, 'readonly');
-            const store = tx.objectStore(DB_STORE);
-            const req = store.getAll();
-            req.onsuccess = () => {
-                const items = req.result || [];
-                items.sort((a, b) => b.id - a.id);
+function loadHistoryFromDB() {
+    return openDB().then(function (db) {
+        return new Promise(function (resolve, reject) {
+            var tx = db.transaction(DB_STORE, 'readonly');
+            var store = tx.objectStore(DB_STORE);
+            var req = store.getAll();
+            req.onsuccess = function () {
+                var items = req.result || [];
+                items.sort(function (a, b) { return b.id - a.id; });
                 resolve(items);
             };
-            req.onerror = () => reject(req.error);
+            req.onerror = function () { reject(req.error); };
         });
-    } catch (e) {
+    }).catch(function (e) {
         console.warn('Error cargando historial de IndexedDB:', e);
         return [];
-    }
+    });
 }
 
-async function saveHistoryToDB(historyArray) {
-    try {
-        const db = await openDB();
-        const tx = db.transaction(DB_STORE, 'readwrite');
-        const store = tx.objectStore(DB_STORE);
-        store.clear();
-        historyArray.forEach(item => store.put(item));
-        return new Promise((resolve, reject) => {
-            tx.oncomplete = resolve;
-            tx.onerror = () => reject(tx.error);
+function saveHistoryToDB(historyArray) {
+    // Limpiar blob URLs antes de guardar (no son persistentes)
+    var cleanArray = JSON.parse(JSON.stringify(historyArray, function (key, value) {
+        if (key === 'videoUrl' && typeof value === 'string' && value.startsWith('blob:')) {
+            return null;
+        }
+        return value;
+    }));
+    return openDB().then(function (db) {
+        return new Promise(function (resolve, reject) {
+            var tx = db.transaction(DB_STORE, 'readwrite');
+            var store = tx.objectStore(DB_STORE);
+            store.clear();
+            cleanArray.forEach(function (item) { store.put(item); });
+            tx.oncomplete = function () { resolve(); };
+            tx.onerror = function () { reject(tx.error); };
         });
-    } catch (e) {
+    }).catch(function (e) {
         console.warn('Error guardando historial en IndexedDB:', e);
-    }
+    });
 }
 
-// ─── Download Helper ─────────────────────────────────────────
+// ─── Download Helper (blob pattern, funciona en todos los navegadores) ───
 function downloadAsset(asset) {
-    const fileName = `creative_engine_${asset.label.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`;
+    var fileName = 'creative_engine_' + asset.label.replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now();
 
     if (asset.videoUrl) {
-        // Si es un blob URL o data URL de video
-        const a = document.createElement('a');
-        a.href = asset.videoUrl;
-        a.download = `${fileName}.webm`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        // Video blob URL → fetch como blob → descargar
+        fetch(asset.videoUrl)
+            .then(function (res) { return res.blob(); })
+            .then(function (blob) {
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = fileName + '.webm';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(function () {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 100);
+            })
+            .catch(function (err) {
+                console.error('Error descargando video:', err);
+                alert('No se pudo descargar el vídeo.');
+            });
         return;
     }
 
     if (asset.url) {
-        // Imagen base64 → descarga directa
-        const a = document.createElement('a');
-        a.href = asset.url;
-        a.download = `${fileName}.png`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        // Imagen base64 → convertir a blob → descargar
+        fetch(asset.url)
+            .then(function (res) { return res.blob(); })
+            .then(function (blob) {
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = fileName + '.png';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(function () {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 100);
+            })
+            .catch(function (err) {
+                console.error('Error descargando imagen:', err);
+                alert('No se pudo descargar la imagen.');
+            });
     }
 }
 
 // ─── Ken Burns Video Generator ───────────────────────────────
 function createKenBurnsVideo(imageUrl) {
-    return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = () => {
-            const W = 720;
-            const H = 900;
-            const DURATION = 4; // seconds
-            const FPS = 30;
-            const TOTAL_FRAMES = DURATION * FPS;
+    return new Promise(function (resolve, reject) {
+        var img = new Image();
+        // NO usar crossOrigin para data URIs
+        img.onload = function () {
+            var W = 720;
+            var H = 900;
+            var DURATION = 4; // seconds
+            var FPS = 30;
+            var TOTAL_FRAMES = DURATION * FPS;
 
-            const canvas = document.createElement('canvas');
+            var canvas = document.createElement('canvas');
             canvas.width = W;
             canvas.height = H;
-            const ctx = canvas.getContext('2d');
+            var ctx = canvas.getContext('2d');
 
-            const stream = canvas.captureStream(FPS);
-            const recorder = new MediaRecorder(stream, {
-                mimeType: 'video/webm;codecs=vp9',
+            var stream = canvas.captureStream(FPS);
+            var mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+                ? 'video/webm;codecs=vp9'
+                : 'video/webm';
+            var recorder = new MediaRecorder(stream, {
+                mimeType: mimeType,
                 videoBitsPerSecond: 2500000
             });
-            const chunks = [];
-            recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-            recorder.onstop = () => {
-                const blob = new Blob(chunks, { type: 'video/webm' });
-                const url = URL.createObjectURL(blob);
+            var chunks = [];
+            recorder.ondataavailable = function (e) {
+                if (e.data && e.data.size > 0) chunks.push(e.data);
+            };
+            recorder.onstop = function () {
+                var blob = new Blob(chunks, { type: 'video/webm' });
+                var url = URL.createObjectURL(blob);
                 resolve(url);
             };
-            recorder.onerror = (e) => reject(e);
+            recorder.onerror = function (e) { reject(e); };
             recorder.start();
 
-            let frame = 0;
+            var frame = 0;
             function drawFrame() {
-                const progress = frame / TOTAL_FRAMES;
+                var progress = frame / TOTAL_FRAMES;
                 // Ken Burns: slow zoom in + slight pan
-                const scale = 1 + progress * 0.15; // zoom from 1.0 to 1.15
-                const panX = progress * 30;  // pan right slightly
-                const panY = progress * 20;  // pan down slightly
+                var scale = 1 + progress * 0.15;
+                var panX = progress * 30;
+                var panY = progress * 20;
 
-                const sw = img.width / scale;
-                const sh = img.height / scale;
-                const sx = panX * (img.width / W);
-                const sy = panY * (img.height / H);
+                var sw = img.width / scale;
+                var sh = img.height / scale;
+                var sx = panX * (img.width / W);
+                var sy = panY * (img.height / H);
 
                 ctx.clearRect(0, 0, W, H);
                 ctx.drawImage(img, sx, sy, sw, sh, 0, 0, W, H);
@@ -150,7 +184,9 @@ function createKenBurnsVideo(imageUrl) {
             }
             drawFrame();
         };
-        img.onerror = () => reject(new Error('No se pudo cargar la imagen para el vídeo'));
+        img.onerror = function () {
+            reject(new Error('No se pudo cargar la imagen para el vídeo'));
+        };
         img.src = imageUrl;
     });
 }
@@ -168,16 +204,22 @@ function App() {
 
     // Persistencia de historial con IndexedDB (sin límite de 5MB)
     const historyLoaded = useRef(false);
+    const saveTimerRef = useRef(null);
+
     useEffect(() => {
-        loadHistoryFromDB().then(saved => {
-            if (saved.length > 0) setHistory(saved);
+        loadHistoryFromDB().then(function (saved) {
+            if (saved && saved.length > 0) setHistory(saved);
             historyLoaded.current = true;
         });
     }, []);
 
     useEffect(() => {
-        if (!historyLoaded.current) return; // No guardar hasta haber cargado
-        saveHistoryToDB(history);
+        if (!historyLoaded.current) return;
+        // Debounce: guardar 500ms después del último cambio
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = setTimeout(function () {
+            saveHistoryToDB(history);
+        }, 500);
     }, [history]);
 
     // Refrescar iconos Lucide

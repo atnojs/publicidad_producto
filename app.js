@@ -651,6 +651,13 @@ function App() {
                                             <img src={asset.url} className="w-full aspect-[4/5] object-cover cursor-zoom-in transition-transform duration-500 group-hover:scale-105" onClick={() => setLightboxItem(asset)} />
                                         )}
 
+                                        {asset.error && (
+                                            <div className="absolute top-4 right-4 bg-red-600/90 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg z-10 pointer-events-none border border-red-500/50">
+                                                <i data-lucide="alert-circle" className="w-3 h-3 inline-block mr-1"></i>
+                                                ERROR
+                                            </div>
+                                        )}
+
                                         {/* Overlay Controles */}
                                         {!asset.loading && (
                                             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-all flex flex-col justify-between p-4 pointer-events-none">
@@ -659,13 +666,13 @@ function App() {
                                                         {asset.label}
                                                     </div>
                                                     <div className="flex gap-2">
-                                                        {!asset.videoUrl && (
+                                                        {!asset.videoUrl && !asset.id.startsWith('vid_') && (
                                                             <button
                                                                 onClick={() => triggerRegenerate(activeProposalIdx, index)}
                                                                 className="w-8 h-8 rounded-full bg-indigo-600/80 hover:bg-indigo-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
                                                             >
                                                                 <i data-lucide="refresh-cw" className="w-4 h-4 text-white"></i>
-                                                                <span className="tooltip">Regenerar</span>
+                                                                <span className="tooltip">Regenerar Imagen</span>
                                                             </button>
                                                         )}
                                                         {!asset.videoUrl ? (
@@ -674,7 +681,7 @@ function App() {
                                                                 className="w-8 h-8 rounded-full bg-fuchsia-600/80 hover:bg-fuchsia-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
                                                             >
                                                                 <i data-lucide="video" className="w-4 h-4 text-white"></i>
-                                                                <span className="tooltip">Generar Video</span>
+                                                                <span className="tooltip">{asset.id.startsWith('vid_') ? "Reintentar Vídeo" : "Generar Video"}</span>
                                                             </button>
                                                         ) : (
                                                             <button

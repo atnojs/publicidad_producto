@@ -1,5 +1,5 @@
 <?php
-// Proxy para Google Gemini + Veo — PHP 8+, cURL habilitado.
+// Proxy para Google Gemini + Veo — PHP 8+, sin cURL (usa stream contexts)
 declare(strict_types = 1)
 ;
 ini_set('display_errors', '0');
@@ -8,8 +8,8 @@ header('Content-Type: application/json; charset=utf-8');
 
 // CORS básico
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
-header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, x-goog-api-key');
+header('Access-Control-Allow-Methods: POST, OPTIONS, GET');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
@@ -30,17 +30,11 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-if (!function_exists('curl_init')) {
-    http_response_code(500);
-    echo json_encode(['error' => 'cURL no está habilitado en el servidor.']);
-    exit;
-}
-
 // API Key
 $API_KEY = getenv('A') ?: getenv('GEMINI_API_KEY');
 if (!$API_KEY) {
     http_response_code(500);
-    echo json_encode(['error' => 'Falta la API key.']);
+    echo json_encode(['error' => 'Falta la API key en el servidor.']);
     exit;
 }
 
@@ -48,12 +42,56 @@ $raw = file_get_contents('php://input') ?: '';
 $req = json_decode($raw, true);
 if (!is_array($req)) {
     http_response_code(400);
-    echo json_encode(['error' => 'JSON inválido.']);
+    echo json_encode(['error' => 'JSON inválido.', 'raw' => $raw]);
     exit;
 }
 
 $BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 $action = (string)($req['action'] ?? 'generate_image');
+
+/**
+ * Función auxiliar para hacer peticiones HTTP sin cURL
+ */
+function make_request($url, $method = 'GET', $headers = [], $body = null)
+{
+    if ($body !== null && !in_array('Content-Type: application/json', $headers)) {
+        $headers[] = 'Content-Type: application/json';
+    }
+
+    $opts = [
+        'http' => [
+            'method' => $method,
+            'header' => implode("\r\n", $headers),
+            'ignore_errors' => true,
+            'timeout' => 120
+        ]
+    ];
+
+    if ($body !== null) {
+        $opts['http']['content'] = is_string($body) ? $body : json_encode($body);
+    }
+
+    $context = stream_context_create($opts);
+    $response = file_get_contents($url, false, $context);
+
+    $status_line = $http_response_header[0];
+    preg_match('{HTTP\/\S*\s(\d{3})}', $status_line, $match);
+    $status = $match[1];
+
+    // Devolver formato de los headers igual a cURL
+    $contentType = 'application/json';
+    foreach ($http_response_header as $h) {
+        if (stripos($h, 'Content-Type:') === 0) {
+            $contentType = trim(substr($h, 13));
+        }
+    }
+
+    return [
+        'status' => (int)$status,
+        'body' => $response,
+        'contentType' => $contentType
+    ];
+}
 
 // ─── ACCIÓN: Generar imagen con Gemini ───────────────────────
 if ($action === 'generate_image') {
@@ -84,31 +122,20 @@ if ($action === 'generate_image') {
         ];
     }
 
-    $ch = curl_init($endpoint);
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POST => true,
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-        CURLOPT_POSTFIELDS => json_encode($payload),
-        CURLOPT_TIMEOUT => 120,
-    ]);
-    $response = curl_exec($ch);
-    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-
-    http_response_code($code ?: 200);
-    echo $response;
+    $res = make_request($endpoint, 'POST', [], $payload);
+    http_response_code($res['status']);
+    header('Content-Type: ' . $res['contentType']);
+    echo $res['body'];
     exit;
 }
 
 // ─── ACCIÓN: Iniciar generación de vídeo con Veo ────────────
 if ($action === 'generate_video') {
-    $model = (string)($req['model'] ?? 'veo-2.0-generate-001');
-    $prompt = trim((string)($req['prompt'] ?? 'Cinematic product video with smooth motion'));
+    $model = (string)($req['model'] ?? 'veo-3.1-generate-preview');
+    $prompt = trim((string)($req['prompt'] ?? 'Cinematic product video'));
     $imageB64 = (string)($req['base64ImageData'] ?? '');
     $mime = (string)($req['mimeType'] ?? 'image/png');
     $aspectRatio = (string)($req['aspectRatio'] ?? '9:16');
-    $duration = (int)($req['durationSeconds'] ?? 5);
 
     $endpoint = "{$BASE_URL}/models/{$model}:predictLongRunning";
 
@@ -127,37 +154,14 @@ if ($action === 'generate_video') {
     $payload = [
         'instances' => [$instance],
         'parameters' => [
-            'aspectRatio' => $aspectRatio,
-            'durationSeconds' => $duration,
-            'sampleCount' => 1,
-            'personGeneration' => 'allow_adult'
+            'aspectRatio' => $aspectRatio
         ]
     ];
 
-    $ch = curl_init($endpoint);
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POST => true,
-        CURLOPT_HTTPHEADER => [
-            'Content-Type: application/json',
-            "x-goog-api-key: {$API_KEY}"
-        ],
-        CURLOPT_POSTFIELDS => json_encode($payload),
-        CURLOPT_TIMEOUT => 30,
-    ]);
-    $response = curl_exec($ch);
-    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlError = curl_error($ch);
-    curl_close($ch);
-
-    if ($curlError) {
-        http_response_code(500);
-        echo json_encode(['error' => 'cURL Error: ' . $curlError]);
-        exit;
-    }
-
-    http_response_code($code ?: 200);
-    echo $response;
+    $res = make_request($endpoint, 'POST', ["x-goog-api-key: {$API_KEY}"], $payload);
+    http_response_code($res['status']);
+    header('Content-Type: ' . $res['contentType']);
+    echo $res['body'];
     exit;
 }
 
@@ -171,22 +175,11 @@ if ($action === 'poll_video') {
     }
 
     $endpoint = "{$BASE_URL}/{$operationName}";
+    $res = make_request($endpoint, 'GET', ["x-goog-api-key: {$API_KEY}"]);
 
-    $ch = curl_init($endpoint);
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_HTTPGET => true,
-        CURLOPT_HTTPHEADER => [
-            "x-goog-api-key: {$API_KEY}"
-        ],
-        CURLOPT_TIMEOUT => 15,
-    ]);
-    $response = curl_exec($ch);
-    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-
-    http_response_code($code ?: 200);
-    echo $response;
+    http_response_code($res['status']);
+    header('Content-Type: ' . $res['contentType']);
+    echo $res['body'];
     exit;
 }
 
@@ -199,25 +192,31 @@ if ($action === 'download_video') {
         exit;
     }
 
-    // Descargar el vídeo y devolver como base64
     $separator = (strpos($videoUri, '?') === false) ? '?' : '&';
     $downloadUrl = $videoUri . $separator . "key={$API_KEY}";
 
-    $ch = curl_init($downloadUrl);
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_HTTPHEADER => [
-            "x-goog-api-key: {$API_KEY}"
-        ],
-        CURLOPT_TIMEOUT => 120,
-    ]);
-    $videoBytes = curl_exec($ch);
-    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE) ?: 'video/mp4';
-    curl_close($ch);
+    $opts = [
+        'http' => [
+            'method' => 'GET',
+            'ignore_errors' => true,
+            'timeout' => 120
+        ]
+    ];
+    $context = stream_context_create($opts);
+    $videoBytes = file_get_contents($downloadUrl, false, $context);
 
-    if ($code >= 200 && $code < 300 && $videoBytes !== false) {
+    $status_line = $http_response_header[0];
+    preg_match('{HTTP\/\S*\s(\d{3})}', $status_line, $match);
+    $status = (int)$match[1];
+
+    $contentType = 'video/mp4';
+    foreach ($http_response_header as $h) {
+        if (stripos($h, 'Content-Type:') === 0) {
+            $contentType = trim(substr($h, 13));
+        }
+    }
+
+    if ($status >= 200 && $status < 300 && $videoBytes !== false) {
         $b64 = base64_encode($videoBytes);
         echo json_encode([
             'videoBase64' => $b64,
@@ -225,8 +224,8 @@ if ($action === 'download_video') {
         ]);
     }
     else {
-        http_response_code($code ?: 500);
-        echo json_encode(['error' => 'No se pudo descargar el vídeo.', 'httpCode' => $code]);
+        http_response_code($status ?: 500);
+        echo json_encode(['error' => 'No se pudo descargar el vídeo.', 'httpCode' => $status, 'body' => $videoBytes]);
     }
     exit;
 }

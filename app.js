@@ -136,16 +136,21 @@ function generateVideoWithVeo(imageDataUrl, prompt, onStatus) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             action: 'generate_video',
-            model: 'veo-2.0-generate-001',
+            model: 'veo-3.1-generate-preview',
             prompt: prompt,
             base64ImageData: base64Data,
             mimeType: mimeType,
-            aspectRatio: '9:16',
-            durationSeconds: 5
+            aspectRatio: '9:16'
         })
     })
         .then(function (res) {
-            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || 'Error HTTP ' + res.status); });
+            if (!res.ok) {
+                return res.json().then(function (d) {
+                    var errMsg = d.error;
+                    if (typeof errMsg === 'object') errMsg = JSON.stringify(errMsg);
+                    throw new Error(errMsg || 'Error HTTP ' + res.status);
+                }).catch(function () { throw new Error('Error HTTP ' + res.status); });
+            }
             return res.json();
         })
         .then(function (data) {

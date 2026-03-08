@@ -84,7 +84,7 @@ function downloadAsset(asset) {
                 var url = URL.createObjectURL(blob);
                 var a = document.createElement('a');
                 a.href = url;
-                a.download = fileName + '.webm';
+                a.download = fileName + '.mp4';
                 document.body.appendChild(a);
                 a.click();
                 setTimeout(function () {
@@ -122,73 +122,92 @@ function downloadAsset(asset) {
     }
 }
 
-// ─── Ken Burns Video Generator ───────────────────────────────
-function createKenBurnsVideo(imageUrl) {
-    return new Promise(function (resolve, reject) {
-        var img = new Image();
-        // NO usar crossOrigin para data URIs
-        img.onload = function () {
-            var W = 720;
-            var H = 900;
-            var DURATION = 4; // seconds
-            var FPS = 30;
-            var TOTAL_FRAMES = DURATION * FPS;
+// ─── Veo Video Generator (IA real) ──────────────────────────
+function generateVideoWithVeo(imageDataUrl, prompt, onStatus) {
+    var parts = imageDataUrl.split(',');
+    var meta = parts[0];
+    var base64Data = parts[1];
+    var mimeType = meta.split(':')[1].split(';')[0];
 
-            var canvas = document.createElement('canvas');
-            canvas.width = W;
-            canvas.height = H;
-            var ctx = canvas.getContext('2d');
+    if (onStatus) onStatus('Enviando imagen a Veo...');
 
-            var stream = canvas.captureStream(FPS);
-            var mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-                ? 'video/webm;codecs=vp9'
-                : 'video/webm';
-            var recorder = new MediaRecorder(stream, {
-                mimeType: mimeType,
-                videoBitsPerSecond: 2500000
-            });
-            var chunks = [];
-            recorder.ondataavailable = function (e) {
-                if (e.data && e.data.size > 0) chunks.push(e.data);
-            };
-            recorder.onstop = function () {
-                var blob = new Blob(chunks, { type: 'video/webm' });
-                var url = URL.createObjectURL(blob);
-                resolve(url);
-            };
-            recorder.onerror = function (e) { reject(e); };
-            recorder.start();
+    return fetch('proxy.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            action: 'generate_video',
+            model: 'veo-2.0-generate-001',
+            prompt: prompt,
+            base64ImageData: base64Data,
+            mimeType: mimeType,
+            aspectRatio: '9:16',
+            durationSeconds: 5
+        })
+    })
+        .then(function (res) {
+            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || 'Error HTTP ' + res.status); });
+            return res.json();
+        })
+        .then(function (data) {
+            var opName = data.name;
+            if (!opName) throw new Error('No se recibió operationName. Respuesta: ' + JSON.stringify(data));
+            if (onStatus) onStatus('Vídeo en cola de generación...');
 
-            var frame = 0;
-            function drawFrame() {
-                var progress = frame / TOTAL_FRAMES;
-                // Ken Burns: slow zoom in + slight pan
-                var scale = 1 + progress * 0.15;
-                var panX = progress * 30;
-                var panY = progress * 20;
+            var maxAttempts = 36;
+            var attempt = 0;
 
-                var sw = img.width / scale;
-                var sh = img.height / scale;
-                var sx = panX * (img.width / W);
-                var sy = panY * (img.height / H);
+            function pollOperation() {
+                attempt++;
+                if (attempt > maxAttempts) throw new Error('Timeout: el vídeo tardó demasiado.');
 
-                ctx.clearRect(0, 0, W, H);
-                ctx.drawImage(img, sx, sy, sw, sh, 0, 0, W, H);
-
-                frame++;
-                if (frame <= TOTAL_FRAMES) {
-                    requestAnimationFrame(drawFrame);
-                } else {
-                    recorder.stop();
-                }
+                return new Promise(function (resolve) {
+                    setTimeout(resolve, 5000);
+                }).then(function () {
+                    if (onStatus) onStatus('Generando vídeo con IA... (' + (attempt * 5) + 's)');
+                    return fetch('proxy.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'poll_video', operationName: opName })
+                    });
+                }).then(function (res) {
+                    return res.json();
+                }).then(function (status) {
+                    if (status.done === true) {
+                        var videoUri = null;
+                        try { videoUri = status.response.generateVideoResponse.generatedSamples[0].video.uri; } catch (e) { }
+                        if (!videoUri) throw new Error('Vídeo generado pero sin URI.');
+                        return videoUri;
+                    }
+                    if (status.error) {
+                        throw new Error('Error de Veo: ' + (status.error.message || JSON.stringify(status.error)));
+                    }
+                    return pollOperation();
+                });
             }
-            drawFrame();
-        };
-        img.onerror = function () {
-            reject(new Error('No se pudo cargar la imagen para el vídeo'));
-        };
-        img.src = imageUrl;
-    });
+
+            return pollOperation();
+        })
+        .then(function (videoUri) {
+            if (onStatus) onStatus('Descargando vídeo...');
+
+            return fetch('proxy.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'download_video', videoUri: videoUri })
+            });
+        })
+        .then(function (res) {
+            if (!res.ok) throw new Error('Error descargando vídeo: HTTP ' + res.status);
+            return res.json();
+        })
+        .then(function (data) {
+            if (!data.videoBase64) throw new Error('No se recibió el vídeo en base64.');
+            var binary = atob(data.videoBase64);
+            var bytes = new Uint8Array(binary.length);
+            for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            var blob = new Blob([bytes], { type: data.mimeType || 'video/mp4' });
+            return URL.createObjectURL(blob);
+        });
 }
 
 function App() {
@@ -243,6 +262,7 @@ function App() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
+                    action: 'generate_image',
                     model: 'gemini-3.1-flash-image-preview',
                     prompt: prompt,
                     base64ImageData: base64Image.split(',')[1],
@@ -348,21 +368,22 @@ function App() {
         setHistory(prev => prev.map(item => item.id === results.id ? newResults : item));
     };
 
+    const [videoStatus, setVideoStatus] = useState('');
+
     const generateVideo = async (proposalIdx, assetIdx) => {
         const currentAsset = results.proposals[proposalIdx].assets[assetIdx];
         if (!currentAsset.url) return alert('No hay imagen para generar vídeo.');
 
-        // Creamos un ID único para el nuevo campo de video
         const newVideoId = `vid_${Date.now()}`;
 
-        // Añadimos una nueva tarjeta al final de la propuesta en estado "cargando"
+        // Añadimos tarjeta en estado "cargando"
         setResults(prev => {
             const updated = JSON.parse(JSON.stringify(prev));
             updated.proposals[proposalIdx].assets.push({
                 id: newVideoId,
                 styleId: currentAsset.styleId,
                 label: `VIDEO: ${currentAsset.label}`,
-                url: null,
+                url: currentAsset.url,
                 prompt: currentAsset.prompt,
                 videoUrl: null,
                 loading: true
@@ -371,10 +392,14 @@ function App() {
         });
 
         try {
-            // Generar vídeo real con Ken Burns (Canvas + MediaRecorder)
-            const videoUrl = await createKenBurnsVideo(currentAsset.url);
+            const videoPrompt = 'Smooth cinematic product video, subtle motion, professional lighting, slow elegant movement, commercial quality. ' + (currentAsset.prompt || '');
 
-            // Actualizamos la tarjeta de video con el blob URL real
+            const videoUrl = await generateVideoWithVeo(
+                currentAsset.url,
+                videoPrompt,
+                function (status) { setVideoStatus(status); }
+            );
+
             setResults(prev => {
                 const updated = JSON.parse(JSON.stringify(prev));
                 const vIdx = updated.proposals[proposalIdx].assets.findIndex(a => a.id === newVideoId);
@@ -385,15 +410,16 @@ function App() {
                 setHistory(prevHist => prevHist.map(item => item.id === updated.id ? updated : item));
                 return updated;
             });
+            setVideoStatus('');
         } catch (err) {
             console.error('Error generando vídeo:', err);
-            // Eliminar la tarjeta de vídeo fallida
             setResults(prev => {
                 const updated = JSON.parse(JSON.stringify(prev));
                 updated.proposals[proposalIdx].assets = updated.proposals[proposalIdx].assets.filter(a => a.id !== newVideoId);
                 return updated;
             });
-            alert('No se pudo generar el vídeo. Inténtalo de nuevo.');
+            setVideoStatus('');
+            alert('Error generando vídeo: ' + err.message);
         }
     };
 
@@ -560,9 +586,9 @@ function App() {
                                 {results.proposals[activeProposalIdx].assets.map((asset, index) => (
                                     <div key={asset.id} className="result-card group glass overflow-hidden rounded-2xl relative min-h-[300px] flex items-center justify-center bg-white/5">
                                         {asset.loading ? (
-                                            <div className="flex flex-col items-center gap-3">
+                                            <div className="flex flex-col items-center gap-3 p-4">
                                                 <div className="w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
-                                                <span className="text-[10px] text-cyan-400 font-bold animate-pulse">GENERANDO...</span>
+                                                <span className="text-[10px] text-cyan-400 font-bold animate-pulse text-center">{(asset.label && asset.label.startsWith('VIDEO') && videoStatus) ? videoStatus : 'GENERANDO...'}</span>
                                             </div>
                                         ) : asset.videoUrl ? (
                                             <video src={asset.videoUrl} className="w-full aspect-[4/5] object-cover" muted autoPlay loop />

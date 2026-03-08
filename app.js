@@ -231,7 +231,22 @@ function App() {
 
     useEffect(() => {
         loadHistoryFromDB().then(function (saved) {
-            if (saved && saved.length > 0) setHistory(saved);
+            if (saved && saved.length > 0) {
+                // Limpiar estados "loading" huérfanos si recargó página mientras generaba
+                const cleanedSaved = saved.map(session => ({
+                    ...session,
+                    proposals: session.proposals ? session.proposals.map(prop => ({
+                        ...prop,
+                        assets: prop.assets ? prop.assets.map(asset => {
+                            if (asset.loading) {
+                                return { ...asset, loading: false, error: true };
+                            }
+                            return asset;
+                        }) : []
+                    })) : []
+                }));
+                setHistory(cleanedSaved);
+            }
             historyLoaded.current = true;
         });
     }, []);
@@ -463,7 +478,12 @@ function App() {
             console.error('Error generando vídeo:', err);
             setResults(prev => {
                 const updated = JSON.parse(JSON.stringify(prev));
-                updated.proposals[proposalIdx].assets = updated.proposals[proposalIdx].assets.filter(a => a.id !== newVideoId);
+                const vIdx = updated.proposals[proposalIdx].assets.findIndex(a => a.id === newVideoId);
+                if (vIdx !== -1) {
+                    updated.proposals[proposalIdx].assets[vIdx].loading = false;
+                    updated.proposals[proposalIdx].assets[vIdx].error = true;
+                }
+                setHistory(prevHist => prevHist.map(item => item.id === updated.id ? updated : item));
                 return updated;
             });
             setVideoStatus('');
@@ -646,7 +666,14 @@ function App() {
                                                 <span className="loading-text text-[10px] mt-4 font-bold text-center">{(asset.label && asset.label.startsWith('VIDEO') && videoStatus) ? videoStatus : 'GENERANDO...'}</span>
                                             </div>
                                         ) : asset.videoUrl ? (
-                                            <video src={asset.videoUrl} className="w-full aspect-[4/5] object-cover" muted autoPlay loop />
+                                            <div className="relative w-full aspect-[4/5] cursor-pointer group-hover:scale-105 transition-transform duration-500 overflow-hidden" onClick={() => setLightboxItem(asset)}>
+                                                <video src={asset.videoUrl} className="w-full h-full object-cover" muted autoPlay loop playsInline />
+                                                <div className="absolute inset-0 bg-black/10 group-hover:bg-black/30 transition-all flex items-center justify-center">
+                                                    <div className="w-12 h-12 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 text-white/80 group-hover:text-white group-hover:scale-110 transition-all shadow-lg">
+                                                        <i data-lucide="play" className="w-5 h-5 ml-1"></i>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         ) : (
                                             <img src={asset.url} className="w-full aspect-[4/5] object-cover cursor-zoom-in transition-transform duration-500 group-hover:scale-105" onClick={() => setLightboxItem(asset)} />
                                         )}

@@ -159,6 +159,12 @@ if ($action === 'generate_video') {
         ]
     ];
 
+    if (isset($req['generateAudio']) && $req['generateAudio'] === true) {
+        $audioPromptExt = isset($req['audioPrompt']) && trim($req['audioPrompt']) !== '' ? "\n[AUDIO REQUIREMENT]: " . trim($req['audioPrompt']) . "\n" : "";
+        $payload['instances'][0]['prompt'] .= $audioPromptExt;
+        $payload['parameters']['generateAudio'] = true;
+    }
+
     $res = make_request($endpoint, 'POST', ["x-goog-api-key: {$API_KEY}"], $payload);
 
     if ($res['status'] !== 200) {

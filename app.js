@@ -111,7 +111,7 @@ function downloadAsset(asset) {
 }
 
 // ─── Veo Video Generator (IA real) ──────────────────────────
-function generateVideoWithVeo(imageDataUrl, prompt, modelName, generateAudio, onStatus) {
+function generateVideoWithVeo(imageDataUrl, prompt, modelName, generateAudio, audioPrompt, onStatus) {
     var parts = imageDataUrl.split(',');
     var meta = parts[0];
     var base64Data = parts[1];
@@ -129,7 +129,8 @@ function generateVideoWithVeo(imageDataUrl, prompt, modelName, generateAudio, on
             base64ImageData: base64Data,
             mimeType: mimeType,
             aspectRatio: '9:16',
-            generateAudio: generateAudio
+            generateAudio: generateAudio,
+            audioPrompt: audioPrompt
         })
     })
         .then(function (res) {
@@ -377,7 +378,14 @@ function App() {
 
         const newUrl = await callGeminiImage(strictPrompt, currentAsset.url);
 
-        asset.url = newUrl || 'https://via.placeholder.com/800x1000?text=Error+al+generar';
+        if (newUrl) {
+            asset.url = newUrl;
+        } else {
+            console.error("Regeneration failed, reverting to previous image.");
+            asset.url = currentAsset.url;
+            alert('Falló la regeneración de la imagen. Por favor, intenta de nuevo.');
+        }
+
         asset.loading = false;
         asset.videoUrl = null;
 
@@ -394,15 +402,15 @@ function App() {
             proposalIdx,
             assetIdx,
             currentAsset,
-            assetIdx,
-            currentAsset,
-            prompt: currentAsset.prompt || ''
+            prompt: currentAsset.prompt || '',
+            generateAudio: false,
+            audioPrompt: ''
         });
     };
 
     const confirmVideoGeneration = async (isStandard) => {
         if (!videoQualityModal) return;
-        const { proposalIdx, assetIdx, currentAsset, prompt } = videoQualityModal;
+        const { proposalIdx, assetIdx, currentAsset, prompt, generateAudio, audioPrompt } = videoQualityModal;
         setVideoQualityModal(null);
 
         const newVideoId = `vid_${Date.now()}`;
@@ -432,6 +440,8 @@ function App() {
                 currentAsset.url,
                 videoPrompt,
                 selectedModel,
+                generateAudio,
+                audioPrompt,
                 function (status) { setVideoStatus(status); }
             );
 
@@ -624,9 +634,13 @@ function App() {
                                 {results.proposals[activeProposalIdx].assets.map((asset, index) => (
                                     <div key={asset.id} className="result-card group glass overflow-hidden rounded-2xl relative min-h-[300px] flex items-center justify-center bg-white/5">
                                         {asset.loading ? (
-                                            <div className="flex flex-col items-center gap-3 p-4">
-                                                <div className="w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
-                                                <span className="text-[10px] text-cyan-400 font-bold animate-pulse text-center">{(asset.label && asset.label.startsWith('VIDEO') && videoStatus) ? videoStatus : 'GENERANDO...'}</span>
+                                            <div className="flex flex-col items-center justify-center p-4">
+                                                <div className="spinner-triple scale-50" style={{ marginBottom: '10px' }}>
+                                                    <div className="ring ring-1"></div>
+                                                    <div className="ring ring-2"></div>
+                                                    <div className="ring ring-3"></div>
+                                                </div>
+                                                <span className="loading-text text-[10px] mt-4 font-bold text-center">{(asset.label && asset.label.startsWith('VIDEO') && videoStatus) ? videoStatus : 'GENERANDO...'}</span>
                                             </div>
                                         ) : asset.videoUrl ? (
                                             <video src={asset.videoUrl} className="w-full aspect-[4/5] object-cover" muted autoPlay loop />

@@ -390,15 +390,15 @@ function App() {
             proposalIdx,
             assetIdx,
             currentAsset,
-            prompt: currentAsset.prompt || '',
-            audioPrompt: '',
-            generateAudio: false
+            assetIdx,
+            currentAsset,
+            prompt: currentAsset.prompt || ''
         });
     };
 
     const confirmVideoGeneration = async (isStandard) => {
         if (!videoQualityModal) return;
-        const { proposalIdx, assetIdx, currentAsset, prompt, audioPrompt, generateAudio } = videoQualityModal;
+        const { proposalIdx, assetIdx, currentAsset, prompt } = videoQualityModal;
         setVideoQualityModal(null);
 
         const newVideoId = `vid_${Date.now()}`;
@@ -421,14 +421,13 @@ function App() {
         try {
             const selectedModel = isStandard ? 'veo-3.1-generate-preview' : 'veo-3.1-fast-generate-preview';
 
-            // Componemos el super-prompt uniendo lo visual y lo auditivo
-            const videoPrompt = `Smooth cinematic product video, subtle motion, professional lighting, slow elegant movement, commercial quality. ${prompt} ${generateAudio && audioPrompt ? ' || Audio Instructions: ' + audioPrompt : ''}`;
+            // Componemos el super-prompt visual
+            const videoPrompt = `Smooth cinematic product video, subtle motion, professional lighting, slow elegant movement, commercial quality. ${prompt}`;
 
             const videoUrl = await generateVideoWithVeo(
                 currentAsset.url,
                 videoPrompt,
                 selectedModel,
-                generateAudio,
                 function (status) { setVideoStatus(status); }
             );
 
@@ -475,7 +474,7 @@ function App() {
                         <div className="ring ring-2"></div>
                         <div className="ring ring-3"></div>
                     </div>
-                    <p className="loading-text">IA CREANDO TUS PROPUESTAS MAESTRAS...</p>
+                    <p className="loading-text">GENERANDO PROPUESTA DE PUBLICIDAD...</p>
                 </div>
             )}
 
@@ -728,9 +727,9 @@ function App() {
                         </div>
 
                         <h3 className="text-2xl font-bold font-montserrat text-center mb-2">Generar Vídeo con Veo 3.1</h3>
-                        <p className="text-white/70 text-center mb-6 text-sm">Añade instrucciones para dirigir a la IA Veo sobre el encuadre o movimiento. Puedes habilitar sonido sincronizado también.</p>
+                        <p className="text-white/70 text-center mb-6 text-sm">Añade instrucciones para dirigir a la IA Veo sobre el encuadre o movimiento.</p>
 
-                        <div className="mb-4">
+                        <div className="mb-6">
                             <label className="text-xs font-bold text-white/50 uppercase tracking-widest mb-2 block">Prompt Visual de Vídeo</label>
                             <textarea
                                 value={videoQualityModal.prompt}
@@ -738,29 +737,6 @@ function App() {
                                 className="w-full bg-black/40 border border-white/20 rounded-xl p-3 h-[80px] focus:outline-none focus:border-fuchsia-400 text-white text-sm resize-none"
                                 placeholder="Describe el movimiento de cámara, los efectos..."
                             />
-                        </div>
-
-                        <div className="mb-6">
-                            <label className="flex items-center gap-3 cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={videoQualityModal.generateAudio}
-                                    onChange={e => setVideoQualityModal({ ...videoQualityModal, generateAudio: e.target.checked })}
-                                    className="w-5 h-5 rounded border-white/20 bg-black/40 text-fuchsia-500 focus:ring-fuchsia-500 focus:ring-offset-gray-900"
-                                />
-                                <span className="text-sm font-bold text-white/90">Generar Audio Sincronizado</span>
-                            </label>
-
-                            {videoQualityModal.generateAudio && (
-                                <div className="mt-3 animate-fade-in fade-in">
-                                    <textarea
-                                        value={videoQualityModal.audioPrompt}
-                                        onChange={e => setVideoQualityModal({ ...videoQualityModal, audioPrompt: e.target.value })}
-                                        className="w-full bg-black/40 border border-fuchsia-500/30 rounded-xl p-3 h-[60px] focus:outline-none focus:border-fuchsia-400 text-fuchsia-100 text-sm resize-none"
-                                        placeholder="Sonido de ambiente, locución, efectos de sonido exactos..."
-                                    />
-                                </div>
-                            )}
                         </div>
 
                         <div className="space-y-3">

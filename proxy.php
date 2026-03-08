@@ -159,10 +159,6 @@ if ($action === 'generate_video') {
         ]
     ];
 
-    if (isset($req['generateAudio']) && $req['generateAudio'] === true) {
-        $payload['parameters']['generateAudio'] = true;
-    }
-
     $res = make_request($endpoint, 'POST', ["x-goog-api-key: {$API_KEY}"], $payload);
 
     if ($res['status'] !== 200) {

@@ -117,57 +117,45 @@ function generateVideoWithVeo(imageDataUrl, prompt, modelName, generateAudio, au
     var base64Data = parts[1];
     var mimeType = meta.split(':')[1].split(';')[0];
 
-    function startGeneration(withAudio) {
-        return fetch('proxy.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                action: 'generate_video',
-                model: modelName || 'veo-3.0-generate-preview',
-                prompt: prompt,
-                base64ImageData: base64Data,
-                mimeType: mimeType,
-                aspectRatio: '16:9',
-                generateAudio: withAudio,
-                audioPrompt: audioPrompt
-            })
-        })
-            .then(function (res) {
-                if (!res.ok) {
-                    return res.text().then(function (text) {
-                        var errMsg = 'Error HTTP ' + res.status;
-                        try {
-                            var d = JSON.parse(text);
-                            if (d.error) {
-                                errMsg = typeof d.error === 'object' ? JSON.stringify(d.error) : d.error;
-                            }
-                        } catch (e) {
-                            errMsg = text || errMsg;
-                        }
-                        throw new Error(errMsg);
-                    });
-                }
-                return res.json();
-            });
-    }
-
     if (onStatus) onStatus('Enviando imagen a Veo...');
 
-    return startGeneration(generateAudio)
-        .then(function (res) {
-            return res;
+    return fetch('proxy.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            action: 'generate_video',
+            model: modelName || 'veo-3.1-generate-preview',
+            prompt: prompt,
+            base64ImageData: base64Data,
+            mimeType: mimeType,
+            aspectRatio: '9:16',
+            generateAudio: generateAudio,
+            audioPrompt: audioPrompt
         })
-        .catch(function (err) {
-            if (!generateAudio) throw err;
-            if (onStatus) onStatus('Audio no disponible en este intento, reintentando sin audio...');
-            return startGeneration(false);
+    })
+        .then(function (res) {
+            if (!res.ok) {
+                return res.text().then(function (text) {
+                    var errMsg = 'Error HTTP ' + res.status;
+                    try {
+                        var d = JSON.parse(text);
+                        if (d.error) {
+                            errMsg = typeof d.error === 'object' ? JSON.stringify(d.error) : d.error;
+                        }
+                    } catch (e) {
+                        errMsg = text || errMsg;
+                    }
+                    throw new Error(errMsg);
+                });
+            }
+            return res.json();
         })
         .then(function (data) {
             var opName = data.name;
             if (!opName) throw new Error('No se recibió operationName. Respuesta: ' + JSON.stringify(data));
             if (onStatus) onStatus('Vídeo en cola de generación...');
 
-            var maxAttempts = generateAudio ? 120 : 72;
+            var maxAttempts = 36;
             var attempt = 0;
 
             function pollOperation() {
@@ -184,11 +172,6 @@ function generateVideoWithVeo(imageDataUrl, prompt, modelName, generateAudio, au
                         body: JSON.stringify({ action: 'poll_video', operationName: opName })
                     });
                 }).then(function (res) {
-                    if (!res.ok) {
-                        return res.text().then(function (txt) {
-                            throw new Error('Error consultando estado del vídeo: ' + txt);
-                        });
-                    }
                     return res.json();
                 }).then(function (status) {
                     if (status.done === true) {
@@ -248,22 +231,7 @@ function App() {
 
     useEffect(() => {
         loadHistoryFromDB().then(function (saved) {
-            if (saved && saved.length > 0) {
-                // Limpiar estados "loading" huérfanos si recargó página mientras generaba
-                const cleanedSaved = saved.map(session => ({
-                    ...session,
-                    proposals: session.proposals ? session.proposals.map(prop => ({
-                        ...prop,
-                        assets: prop.assets ? prop.assets.map(asset => {
-                            if (asset.loading) {
-                                return { ...asset, loading: false, error: true };
-                            }
-                            return asset;
-                        }) : []
-                    })) : []
-                }));
-                setHistory(cleanedSaved);
-            }
+            if (saved && saved.length > 0) setHistory(saved);
             historyLoaded.current = true;
         });
     }, []);
@@ -293,675 +261,628 @@ function App() {
     };
 
     const callGeminiImage = async (prompt, base64Image) => {
-        const callGeminiImage = async (prompt, base64Image, options = {}) => {
-            try {
-                const payload = {
+        try {
+            const response = await fetch('proxy.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
                     action: 'generate_image',
-                    model: 'gemini-3.1-flash-image-preview'
-                };
-
-                if (options.strictEditMode) {
-                    payload.contents = [{
-                        parts: [
-                            { text: prompt },
-                            {
-                                inlineData: {
-                                    mimeType: base64Image.split(';')[0].split(':')[1],
-                                    data: base64Image.split(',')[1]
-                                }
-                            }
-                        ]
-                    }];
-                    payload.generationConfig = {
-                        responseModalities: ['TEXT', 'IMAGE'],
-                        temperature: 0.1,
-                        topP: 0.8,
-                        topK: 20
-                    };
-                } else {
-                    payload.prompt = prompt;
-                    payload.base64ImageData = base64Image.split(',')[1];
-                    payload.mimeType = base64Image.split(';')[0].split(':')[1];
-                }
-
-                const response = await fetch('proxy.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
-                const data = await response.json();
-                // El modelo gemini-3.1-flash-image-preview devuelve la imagen en candidates[0].content.parts
-                // Buscamos la part que tenga inlineData
-                const imagePart = data.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
-                if (imagePart) {
-                    return `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`;
-                }
-                throw new Error("No se recibió imagen de la IA");
-            } catch (err) {
-                console.error("Error en callGeminiImage:", err);
-                return null;
-            }
-        };
-
-        const generateAds = async () => {
-            if (!imagePreview || !description) return alert("Por favor, sube una imagen y describe el producto.");
-
-            setIsGenerating(true);
-            setCurrentStep('processing');
-
-            try {
-                // Inicializar estructura vacía para que el usuario vea el contenedor (Solo 1 Propuesta ahora)
-                const emptyProposals = ['Propuesta Única'].map(pLabel => ({
-                    label: pLabel,
-                    assets: AD_STYLES.map(style => ({
-                        id: `${style.id}_${Math.random().toString(36).substr(2, 5)}`,
-                        styleId: style.id,
-                        label: style.label,
-                        url: null,
-                        prompt: `${description}. ${style.promptSuffix}`,
-                        videoUrl: null,
-                        loading: true
-                    }))
-                }));
-
-                const batchId = Date.now();
-                const fullBatch = {
-                    id: batchId,
-                    baseImage: imagePreview,
-                    timestamp: new Date().toLocaleString(),
-                    proposals: emptyProposals
-                };
-
-                setResults(fullBatch);
-                setCurrentStep('results');
-                setActiveProposalIdx(0);
-
-                // Generar imágenes progresivamente para la propuesta única
-                for (let i = 0; i < AD_STYLES.length; i++) {
-                    const style = AD_STYLES[i];
-                    const prompt = `${description}. ${style.promptSuffix}`;
-
-                    // Llamada real a la API
-                    const imageUrl = await callGeminiImage(prompt, imagePreview);
-
-                    setResults(prev => {
-                        const updated = JSON.parse(JSON.stringify(prev)); // Deep copy para forzar re-render
-                        updated.proposals[0].assets[i].url = imageUrl || 'https://via.placeholder.com/800x1000?text=Error+al+generar';
-                        updated.proposals[0].assets[i].loading = false;
-                        return updated;
-                    });
-                }
-
-                // Actualizar historial al finalizar todo usando el objeto FINAL
-                setResults(finalBatch => {
-                    setHistory(prev => [finalBatch, ...prev]);
-                    return finalBatch;
-                });
-
-            } catch (err) {
-                console.error(err);
-                alert("Error general al generar los anuncios.");
-                setCurrentStep('input');
-            } finally {
-                setIsGenerating(false);
-            }
-        };
-
-        const triggerRegenerate = (proposalIdx, assetIdx) => {
-            const currentAsset = results.proposals[proposalIdx].assets[assetIdx];
-            setRegenerateModal({ proposalIdx, assetIdx, currentAsset, prompt: currentAsset.prompt || '' });
-        };
-
-        const confirmRegenerate = async () => {
-            if (!regenerateModal) return;
-            const { proposalIdx, assetIdx, prompt, currentAsset } = regenerateModal;
-            setRegenerateModal(null);
-
-            const originalUrl = currentAsset.url;
-
-            // Clone prevent reference mutation
-            const newResults = JSON.parse(JSON.stringify(results));
-            const asset = newResults.proposals[proposalIdx].assets[assetIdx];
-
-            asset.loading = true;
-            asset.url = null;
-            asset.prompt = prompt; // Actualizamos el prompt con la versión del usuario
-            setResults(newResults);
-
-            const userPrompt = (prompt || '').trim();
-            const isColorOnlyRequest = /(solo|solamente|unicamente|únicamente|sin cambiar|no cambies|no modificar|mant[eé]n|mantener).*(color)/i.test(userPrompt) ||
-                /(cambia|cambiar|ajusta|ajustar).*(color)/i.test(userPrompt);
-
-            const strictPrompt = userPrompt === ''
-                ? "Create a COMPLETELY DIFFERENT, RADICALLY NEW, highly creative and visually striking product advertising variation. You MUST change EVERYTHING: different background scene (indoor/outdoor location), different lighting (time of day, artificial/natural), different angle (front/side/above/below), different composition, different color grading, different mood and atmosphere. The product must remain the SAME but everything else must be TOTALLY NEW and DISTINCT from the reference. Create a unique, fresh creative direction."
-                : isColorOnlyRequest
-                    ? `CRITICAL EDIT MODE: Keep the reference image IDENTICAL in framing, camera angle, product shape, logos, texture, background, lighting, shadows, and composition. Apply ONLY this color adjustment and nothing else: "${userPrompt}". Do not redesign, do not recompose, do not replace garments/objects, do not change model identity. Return one edited image with maximum consistency.`
-                    : `CRITICAL INSTRUCTION: You are an expert photo retoucher. Your task is to accurately reproduce the provided reference image while applying ONLY the requested modifications. Do NOT hallucinate entirely new backgrounds, lighting, or compositions unless explicitly requested. Keep the original product perfectly intact. User requested edits: "${userPrompt}".`;
-
-            const newUrl = await callGeminiImage(strictPrompt, originalUrl, {
-                strictEditMode: isColorOnlyRequest
+                    model: 'gemini-3.1-flash-image-preview',
+                    prompt: prompt,
+                    base64ImageData: base64Image.split(',')[1],
+                    mimeType: base64Image.split(';')[0].split(':')[1]
+                })
             });
 
-            if (newUrl) {
-                asset.url = newUrl;
-            } else {
-                console.error("Regeneration failed, reverting to previous image.");
-                asset.url = originalUrl;
-                alert('Falló la regeneración de la imagen. Por favor, intenta de nuevo.');
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+            const data = await response.json();
+            // El modelo gemini-3.1-flash-image-preview devuelve la imagen en candidates[0].content.parts
+            // Buscamos la part que tenga inlineData
+            const imagePart = data.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+            if (imagePart) {
+                return `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`;
             }
+            throw new Error("No se recibió imagen de la IA");
+        } catch (err) {
+            console.error("Error en callGeminiImage:", err);
+            return null;
+        }
+    };
 
-            asset.loading = false;
-            asset.videoUrl = null;
+    const generateAds = async () => {
+        if (!imagePreview || !description) return alert("Por favor, sube una imagen y describe el producto.");
 
-            setResults(newResults);
-            setHistory(prev => prev.map(item => item.id === results.id ? newResults : item));
-        };
+        setIsGenerating(true);
+        setCurrentStep('processing');
 
-        const [videoStatus, setVideoStatus] = useState('');
-
-        const triggerVideoGeneration = (proposalIdx, assetIdx) => {
-            const currentAsset = results.proposals[proposalIdx].assets[assetIdx];
-            if (!currentAsset.url && !currentAsset.imageUrl) return alert('No hay imagen para generar vídeo.');
-            const imageUrlToUse = currentAsset.url || currentAsset.imageUrl;
-            setVideoQualityModal({
-                proposalIdx,
-                assetIdx,
-                currentAsset: { ...currentAsset, url: imageUrlToUse },
-                prompt: currentAsset.prompt || '',
-                generateAudio: false,
-                audioPrompt: ''
-            });
-        };
-
-        const confirmVideoGeneration = async (isStandard) => {
-            if (!videoQualityModal) return;
-            const { proposalIdx, assetIdx, currentAsset, prompt, generateAudio, audioPrompt } = videoQualityModal;
-            setVideoQualityModal(null);
-
-            const newVideoId = `vid_${Date.now()}`;
-
-            // Añadimos tarjeta en estado "cargando"
-            setResults(prev => {
-                const updated = JSON.parse(JSON.stringify(prev));
-                updated.proposals[proposalIdx].assets.push({
-                    id: newVideoId,
-                    styleId: currentAsset.styleId,
-                    label: `VIDEO: ${currentAsset.label}`,
-                    url: currentAsset.url,
-                    prompt: prompt, // Actualizamos con la nueva instrucción visual
+        try {
+            // Inicializar estructura vacía para que el usuario vea el contenedor (Solo 1 Propuesta ahora)
+            const emptyProposals = ['Propuesta Única'].map(pLabel => ({
+                label: pLabel,
+                assets: AD_STYLES.map(style => ({
+                    id: `${style.id}_${Math.random().toString(36).substr(2, 5)}`,
+                    styleId: style.id,
+                    label: style.label,
+                    url: null,
+                    prompt: `${description}. ${style.promptSuffix}`,
                     videoUrl: null,
                     loading: true
+                }))
+            }));
+
+            const batchId = Date.now();
+            const fullBatch = {
+                id: batchId,
+                baseImage: imagePreview,
+                timestamp: new Date().toLocaleString(),
+                proposals: emptyProposals
+            };
+
+            setResults(fullBatch);
+            setCurrentStep('results');
+            setActiveProposalIdx(0);
+
+            // Generar imágenes progresivamente para la propuesta única
+            for (let i = 0; i < AD_STYLES.length; i++) {
+                const style = AD_STYLES[i];
+                const prompt = `${description}. ${style.promptSuffix}`;
+
+                // Llamada real a la API
+                const imageUrl = await callGeminiImage(prompt, imagePreview);
+
+                setResults(prev => {
+                    const updated = JSON.parse(JSON.stringify(prev)); // Deep copy para forzar re-render
+                    updated.proposals[0].assets[i].url = imageUrl || 'https://via.placeholder.com/800x1000?text=Error+al+generar';
+                    updated.proposals[0].assets[i].loading = false;
+                    return updated;
                 });
-                return updated;
+            }
+
+            // Actualizar historial al finalizar todo usando el objeto FINAL
+            setResults(finalBatch => {
+                setHistory(prev => [finalBatch, ...prev]);
+                return finalBatch;
             });
 
-            try {
-                const selectedModel = isStandard ? 'veo-3.0-generate-preview' : 'veo-3.0-fast-generate-preview';
+        } catch (err) {
+            console.error(err);
+            alert("Error general al generar los anuncios.");
+            setCurrentStep('input');
+        } finally {
+            setIsGenerating(false);
+        }
+    };
 
-                // Componemos el super-prompt visual
-                const videoPrompt = `Smooth cinematic product video, subtle motion, professional lighting, slow elegant movement, commercial quality. ${prompt}`;
+    const triggerRegenerate = (proposalIdx, assetIdx) => {
+        const currentAsset = results.proposals[proposalIdx].assets[assetIdx];
+        setRegenerateModal({ proposalIdx, assetIdx, currentAsset, prompt: currentAsset.prompt || '' });
+    };
 
-                const videoUrl = await generateVideoWithVeo(
-                    currentAsset.url,
-                    videoPrompt,
-                    selectedModel,
-                    generateAudio,
-                    audioPrompt,
-                    function (status) { setVideoStatus(status); }
-                );
+    const confirmRegenerate = async () => {
+        if (!regenerateModal) return;
+        const { proposalIdx, assetIdx, prompt, currentAsset } = regenerateModal;
+        setRegenerateModal(null);
 
-                setResults(prev => {
-                    const updated = JSON.parse(JSON.stringify(prev));
-                    const vIdx = updated.proposals[proposalIdx].assets.findIndex(a => a.id === newVideoId);
-                    if (vIdx !== -1) {
-                        updated.proposals[proposalIdx].assets[vIdx].videoUrl = videoUrl;
-                        updated.proposals[proposalIdx].assets[vIdx].loading = false;
-                    }
-                    setHistory(prevHist => prevHist.map(item => item.id === updated.id ? updated : item));
-                    return updated;
-                });
-                setVideoStatus('');
-            } catch (err) {
-                console.error('Error generando vídeo:', err);
-                setResults(prev => {
-                    const updated = JSON.parse(JSON.stringify(prev));
-                    const vIdx = updated.proposals[proposalIdx].assets.findIndex(a => a.id === newVideoId);
-                    if (vIdx !== -1) {
-                        updated.proposals[proposalIdx].assets[vIdx].loading = false;
-                        updated.proposals[proposalIdx].assets[vIdx].error = true;
-                    }
-                    setHistory(prevHist => prevHist.map(item => item.id === updated.id ? updated : item));
-                    return updated;
-                });
-                setVideoStatus('');
-                alert('Error generando vídeo: ' + err.message);
-            }
-        };
+        const originalUrl = currentAsset.url;
 
-        const deleteHistoryItem = (id) => {
-            if (confirm("¿Eliminar este lote de anuncios?")) {
-                setHistory(prev => prev.filter(item => item.id !== id));
-                if (results && results.id === id) {
-                    setResults(null);
-                    setCurrentStep('input');
+        // Clone prevent reference mutation
+        const newResults = JSON.parse(JSON.stringify(results));
+        const asset = newResults.proposals[proposalIdx].assets[assetIdx];
+
+        asset.loading = true;
+        asset.url = null;
+        asset.prompt = prompt; // Actualizamos el prompt con la versión del usuario
+        setResults(newResults);
+
+        const strictPrompt = prompt.trim() === ''
+            ? "Create a completely new, highly creative and visually striking product advertising variation using the reference image as inspiration."
+            : `CRITICAL INSTRUCTION: You are an expert photo retoucher. Your task is to accurately reproduce the provided reference image while applying ONLY the requested modifications. Do NOT hallucinate entirely new backgrounds, lighting, or compositions unless explicitly requested. Keep the original product perfectly intact. User requested edits: "${prompt}".`;
+
+        const newUrl = await callGeminiImage(strictPrompt, originalUrl);
+
+        if (newUrl) {
+            asset.url = newUrl;
+        } else {
+            console.error("Regeneration failed, reverting to previous image.");
+            asset.url = originalUrl;
+            alert('Falló la regeneración de la imagen. Por favor, intenta de nuevo.');
+        }
+
+        asset.loading = false;
+        asset.videoUrl = null;
+
+        setResults(newResults);
+        setHistory(prev => prev.map(item => item.id === results.id ? newResults : item));
+    };
+
+    const [videoStatus, setVideoStatus] = useState('');
+
+    const triggerVideoGeneration = (proposalIdx, assetIdx) => {
+        const currentAsset = results.proposals[proposalIdx].assets[assetIdx];
+        if (!currentAsset.url) return alert('No hay imagen para generar vídeo.');
+        setVideoQualityModal({
+            proposalIdx,
+            assetIdx,
+            currentAsset,
+            prompt: currentAsset.prompt || '',
+            generateAudio: false,
+            audioPrompt: ''
+        });
+    };
+
+    const confirmVideoGeneration = async (isStandard) => {
+        if (!videoQualityModal) return;
+        const { proposalIdx, assetIdx, currentAsset, prompt, generateAudio, audioPrompt } = videoQualityModal;
+        setVideoQualityModal(null);
+
+        const newVideoId = `vid_${Date.now()}`;
+
+        // Añadimos tarjeta en estado "cargando"
+        setResults(prev => {
+            const updated = JSON.parse(JSON.stringify(prev));
+            updated.proposals[proposalIdx].assets.push({
+                id: newVideoId,
+                styleId: currentAsset.styleId,
+                label: `VIDEO: ${currentAsset.label}`,
+                url: currentAsset.url,
+                prompt: prompt, // Actualizamos con la nueva instrucción visual
+                videoUrl: null,
+                loading: true
+            });
+            return updated;
+        });
+
+        try {
+            const selectedModel = isStandard ? 'veo-3.1-generate-preview' : 'veo-3.1-fast-generate-preview';
+
+            // Componemos el super-prompt visual
+            const videoPrompt = `Smooth cinematic product video, subtle motion, professional lighting, slow elegant movement, commercial quality. ${prompt}`;
+
+            const videoUrl = await generateVideoWithVeo(
+                currentAsset.url,
+                videoPrompt,
+                selectedModel,
+                generateAudio,
+                audioPrompt,
+                function (status) { setVideoStatus(status); }
+            );
+
+            setResults(prev => {
+                const updated = JSON.parse(JSON.stringify(prev));
+                const vIdx = updated.proposals[proposalIdx].assets.findIndex(a => a.id === newVideoId);
+                if (vIdx !== -1) {
+                    updated.proposals[proposalIdx].assets[vIdx].videoUrl = videoUrl;
+                    updated.proposals[proposalIdx].assets[vIdx].loading = false;
                 }
+                setHistory(prevHist => prevHist.map(item => item.id === updated.id ? updated : item));
+                return updated;
+            });
+            setVideoStatus('');
+        } catch (err) {
+            console.error('Error generando vídeo:', err);
+            setResults(prev => {
+                const updated = JSON.parse(JSON.stringify(prev));
+                updated.proposals[proposalIdx].assets = updated.proposals[proposalIdx].assets.filter(a => a.id !== newVideoId);
+                return updated;
+            });
+            setVideoStatus('');
+            alert('Error generando vídeo: ' + err.message);
+        }
+    };
+
+    const deleteHistoryItem = (id) => {
+        if (confirm("¿Eliminar este lote de anuncios?")) {
+            setHistory(prev => prev.filter(item => item.id !== id));
+            if (results && results.id === id) {
+                setResults(null);
+                setCurrentStep('input');
             }
-        };
+        }
+    };
 
-        return (
-            <div className="app-container">
-                {/* Overlay de Carga Stándard */}
-                {isGenerating && (
-                    <div className="loading-overlay">
-                        <div className="spinner-triple">
-                            <div className="ring ring-1"></div>
-                            <div className="ring ring-2"></div>
-                            <div className="ring ring-3"></div>
-                        </div>
-                        <p className="loading-text">GENERANDO PROPUESTA DE PUBLICIDAD...</p>
+    return (
+        <div className="app-container">
+            {/* Overlay de Carga Stándard */}
+            {isGenerating && (
+                <div className="loading-overlay">
+                    <div className="spinner-triple">
+                        <div className="ring ring-1"></div>
+                        <div className="ring ring-2"></div>
+                        <div className="ring ring-3"></div>
                     </div>
-                )}
+                    <p className="loading-text">GENERANDO PROPUESTA DE PUBLICIDAD...</p>
+                </div>
+            )}
 
-                {/* Sidebar Historial */}
-                <aside className="sidebar glass border-r border-white/10">
-                    <div className="p-6">
-                        <h2 className="text-xl font-bold text-cyan-400 mb-6 flex items-center gap-2">
-                            <i data-lucide="history"></i> Historial
-                        </h2>
-                        <div className="space-y-4 history-list overflow-y-auto max-h-[80vh]">
-                            {history.length === 0 && <p className="text-white/40 italic">Sin campañas generadas</p>}
-                            {history.map(item => (
-                                <div key={item.id} className={`history-card glass-hover p-3 rounded-lg cursor-pointer group ${results && results.id === item.id ? 'active-history' : ''}`} onClick={() => { setResults(item); setCurrentStep('results'); setActiveProposalIdx(0); }}>
-                                    <div className="flex gap-3 items-center">
-                                        <img src={item.baseImage} className="w-12 h-12 rounded object-cover border border-white/20" />
-                                        <div className="flex-1 overflow-hidden">
-                                            <p className="text-xs text-white/60">{item.timestamp}</p>
-                                            <p className="text-sm font-medium truncate">Campaña #{item.id.toString().slice(-4)}</p>
-                                        </div>
-                                        <div className="flex gap-1">
-                                            <button onClick={(e) => { e.stopPropagation(); deleteHistoryItem(item.id); }} className="opacity-0 group-hover:opacity-100 p-2 text-rose-500 hover:bg-rose-500/20 rounded-full transition-all">
-                                                <i data-lucide="trash-2" className="w-4 h-4"></i>
+            {/* Sidebar Historial */}
+            <aside className="sidebar glass border-r border-white/10">
+                <div className="p-6">
+                    <h2 className="text-xl font-bold text-cyan-400 mb-6 flex items-center gap-2">
+                        <i data-lucide="history"></i> Historial
+                    </h2>
+                    <div className="space-y-4 history-list overflow-y-auto max-h-[80vh]">
+                        {history.length === 0 && <p className="text-white/40 italic">Sin campañas generadas</p>}
+                        {history.map(item => (
+                            <div key={item.id} className={`history-card glass-hover p-3 rounded-lg cursor-pointer group ${results && results.id === item.id ? 'active-history' : ''}`} onClick={() => { setResults(item); setCurrentStep('results'); setActiveProposalIdx(0); }}>
+                                <div className="flex gap-3 items-center">
+                                    <img src={item.baseImage} className="w-12 h-12 rounded object-cover border border-white/20" />
+                                    <div className="flex-1 overflow-hidden">
+                                        <p className="text-xs text-white/60">{item.timestamp}</p>
+                                        <p className="text-sm font-medium truncate">Campaña #{item.id.toString().slice(-4)}</p>
+                                    </div>
+                                    <button onClick={(e) => { e.stopPropagation(); deleteHistoryItem(item.id); }} className="opacity-0 group-hover:opacity-100 p-2 text-rose-500 hover:bg-rose-500/20 rounded-full transition-all">
+                                        <i data-lucide="trash-2" className="w-4 h-4"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </aside>
+
+            {/* Main Content */}
+            <main className="main-content">
+                <header className="flex justify-between items-center mb-10 px-8 py-6">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-gradient-to-br from-cyan-400 to-fuchsia-500 rounded-lg flex items-center justify-center shadow-[0_0_15px_rgba(34,211,238,0.5)]">
+                            <i data-lucide="zap" className="text-white"></i>
+                        </div>
+                        <div>
+                            <h1 className="text-2xl font-black tracking-tighter text-white leading-none">
+                                CREATIVE <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-fuchsia-500">ENGINE</span>
+                            </h1>
+                            <p className="text-fuchsia-400 text-sm font-medium mt-1">Publicita tus productos</p>
+                        </div>
+                    </div>
+                    <button className="glass-white px-4 py-2 rounded-full flex items-center gap-2 text-sm hover:bg-white/10 transition-all font-medium">
+                        <i data-lucide="external-link" className="w-4 h-4"></i> Tutorial
+                    </button>
+                </header>
+
+                <div className="content-inner px-8">
+                    {currentStep === 'input' && (
+                        <div className="max-w-4xl mx-auto py-10 fade-in">
+                            <div className="text-center mb-12">
+                                <h2 className="text-4xl font-bold mb-4">Transforma una foto en <span className="text-cyan-400">Todo tu Marketing</span></h2>
+                                <p className="text-white/60 text-lg">Sube la foto base de tu producto y genera una <span className="text-fuchsia-400 font-bold">Propuesta Maestra</span>.</p>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                                {/* Upload Zone */}
+                                <div className="upload-container">
+                                    <label className="upload-card glass border-2 border-dashed border-white/20 hover:border-cyan-400/50 transition-all cursor-pointer flex flex-col items-center justify-center min-h-[400px] rounded-2xl relative overflow-hidden group">
+                                        {imagePreview ? (
+                                            <div className="w-full h-full absolute inset-0">
+                                                <img src={imagePreview} className="w-full h-full object-cover" />
+                                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
+                                                    <span className="bg-white/20 backdrop-blur-md px-4 py-2 rounded-full text-sm font-bold">CAMBIAR IMAGEN</span>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <div className="w-16 h-16 rounded-full bg-cyan-400/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-all">
+                                                    <i data-lucide="upload" className="text-cyan-400 w-8 h-8"></i>
+                                                </div>
+                                                <p className="text-lg font-medium">Sube tu producto</p>
+                                                <p className="text-white/40 text-sm">JPG, PNG o WEBP (máx 5MB)</p>
+                                            </>
+                                        )}
+                                        <input type="file" className="hidden" onChange={handleImageUpload} accept="image/*" />
+                                    </label>
+                                </div>
+
+                                {/* Form Zone */}
+                                <div className="flex flex-col justify-center space-y-8">
+                                    <div className="space-y-3">
+                                        <label className="text-sm font-bold text-cyan-400 uppercase tracking-widest pl-1">Descripción del Producto</label>
+                                        <textarea
+                                            value={description}
+                                            onChange={(e) => setDescription(e.target.value)}
+                                            placeholder="Ej: Elegante reloj de cuero negro con esfera plateada, estilo minimalista..."
+                                            className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 min-h-[150px] focus:outline-none focus:border-cyan-400/50 transition-all text-white placeholder:text-white/20"
+                                        />
+                                    </div>
+
+                                    <button
+                                        onClick={generateAds}
+                                        disabled={isGenerating || !imagePreview || !description}
+                                        className="w-full py-5 rounded-2xl bg-gradient-to-r from-cyan-500 to-indigo-600 font-bold text-lg flex items-center justify-center gap-3 shadow-[0_10px_30px_rgba(6,182,212,0.3)] hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {isGenerating ? <i data-lucide="loader-2" className="animate-spin text-white"></i> : <i data-lucide="sparkles" className="text-white"></i>}
+                                        <span className="text-white">{isGenerating ? 'PROCESANDO...' : 'GENERAR PROPUESTA MAESTRA'}</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {currentStep === 'results' && results && (
+                        <div className="py-6 fade-in">
+                            <div className="flex justify-between items-end mb-8 border-b border-white/10 pb-6">
+                                <div>
+                                    <button onClick={() => setCurrentStep('input')} className="text-cyan-400 hover:text-cyan-300 flex items-center gap-2 mb-2 transition-all font-medium">
+                                        <i data-lucide="arrow-left" className="w-4 h-4"></i> Volver a Crear
+                                    </button>
+                                    <h2 className="text-2xl font-bold font-montserrat">Oferta Publicitaria</h2>
+                                    <p className="text-white/50 text-sm">Lote: {results.timestamp}</p>
+                                </div>
+
+                                {/* Tabs de Propuestas - Solo si hay más de una */}
+                                {results.proposals.length > 1 && (
+                                    <div className="flex glass p-1 rounded-xl">
+                                        {results.proposals.map((prop, idx) => (
+                                            <button
+                                                key={idx}
+                                                onClick={() => setActiveProposalIdx(idx)}
+                                                className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeProposalIdx === idx ? 'bg-cyan-500 text-white shadow-lg' : 'text-white/60 hover:text-white'}`}
+                                            >
+                                                {prop.label}
                                             </button>
-                                        </div>
+                                        ))}
                                     </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </aside>
+                                )}
 
-                {/* Main Content */}
-                <main className="main-content">
-                    <header className="flex justify-between items-center mb-10 px-8 py-6">
-                        <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-gradient-to-br from-cyan-400 to-fuchsia-500 rounded-lg flex items-center justify-center shadow-[0_0_15px_rgba(34,211,238,0.5)]">
-                                <i data-lucide="zap" className="text-white"></i>
-                            </div>
-                            <div>
-                                <h1 className="text-2xl font-black tracking-tighter text-white leading-none">
-                                    CREATIVIDAD<span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-fuchsia-500">PUBLICITARIA</span>
-                                </h1>
-                                <p className="text-fuchsia-400 text-sm font-medium mt-1">Publicita tus productos</p>
-                            </div>
-                        </div>
-                        <button className="glass-white px-4 py-2 rounded-full flex items-center gap-2 text-sm hover:bg-white/10 transition-all font-medium">
-                            <i data-lucide="external-link" className="w-4 h-4"></i> Tutorial
-                        </button>
-                    </header>
-
-                    <div className="content-inner px-8">
-                        {currentStep === 'input' && (
-                            <div className="max-w-4xl mx-auto py-10 fade-in">
-                                <div className="text-center mb-12">
-                                    <h2 className="text-4xl font-bold mb-4">Transforma una foto en <span className="text-cyan-400">Todo tu Marketing</span></h2>
-                                    <p className="text-white/60 text-lg">Sube la foto base de tu producto y genera una <span className="text-fuchsia-400 font-bold">Propuesta Maestra</span>.</p>
-                                </div>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                                    {/* Upload Zone */}
-                                    <div className="upload-container">
-                                        <label className="upload-card glass border-2 border-dashed border-white/20 hover:border-cyan-400/50 transition-all cursor-pointer flex flex-col items-center justify-center min-h-[400px] rounded-2xl relative overflow-hidden group">
-                                            {imagePreview ? (
-                                                <div className="w-full h-full absolute inset-0">
-                                                    <img src={imagePreview} className="w-full h-full object-cover" />
-                                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
-                                                        <span className="bg-white/20 backdrop-blur-md px-4 py-2 rounded-full text-sm font-bold">CAMBIAR IMAGEN</span>
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <>
-                                                    <div className="w-16 h-16 rounded-full bg-cyan-400/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-all">
-                                                        <i data-lucide="upload" className="text-cyan-400 w-8 h-8"></i>
-                                                    </div>
-                                                    <p className="text-lg font-medium">Sube tu producto</p>
-                                                    <p className="text-white/40 text-sm">JPG, PNG o WEBP (máx 5MB)</p>
-                                                </>
-                                            )}
-                                            <input type="file" className="hidden" onChange={handleImageUpload} accept="image/*" />
-                                        </label>
-                                    </div>
-
-                                    {/* Form Zone */}
-                                    <div className="flex flex-col justify-center space-y-8">
-                                        <div className="space-y-3">
-                                            <label className="text-sm font-bold text-cyan-400 uppercase tracking-widest pl-1">Descripción del Producto</label>
-                                            <textarea
-                                                value={description}
-                                                onChange={(e) => setDescription(e.target.value)}
-                                                placeholder="Ej: Elegante reloj de cuero negro con esfera plateada, estilo minimalista..."
-                                                className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 min-h-[150px] focus:outline-none focus:border-cyan-400/50 transition-all text-white placeholder:text-white/20"
-                                            />
-                                        </div>
-
-                                        <button
-                                            onClick={generateAds}
-                                            disabled={isGenerating || !imagePreview || !description}
-                                            className="w-full py-5 rounded-2xl bg-gradient-to-r from-cyan-500 to-indigo-600 font-bold text-lg flex items-center justify-center gap-3 shadow-[0_10px_30px_rgba(6,182,212,0.3)] hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
-                                            {isGenerating ? <i data-lucide="loader-2" className="animate-spin text-white"></i> : <i data-lucide="sparkles" className="text-white"></i>}
-                                            <span className="text-white">{isGenerating ? 'PROCESANDO...' : 'GENERAR PROPUESTA MAESTRA'}</span>
-                                        </button>
-                                    </div>
+                                <div className="flex gap-4">
+                                    <button className="glass-white px-5 py-2 rounded-xl flex items-center gap-2 text-sm font-bold hover:bg-white/10" onClick={() => {
+                                        const assets = results.proposals[activeProposalIdx].assets.filter(a => !a.loading && (a.url || a.videoUrl));
+                                        assets.forEach((asset, i) => setTimeout(() => downloadAsset(asset), i * 300));
+                                    }}>
+                                        <i data-lucide="download-cloud" className="w-4 h-4"></i> Exportar Todo
+                                    </button>
                                 </div>
                             </div>
-                        )}
 
-                        {currentStep === 'results' && results && (
-                            <div className="py-6 fade-in">
-                                <div className="flex justify-between items-end mb-8 border-b border-white/10 pb-6">
-                                    <div>
-                                        <button onClick={() => setCurrentStep('input')} className="text-cyan-400 hover:text-cyan-300 flex items-center gap-2 mb-2 transition-all font-medium">
-                                            <i data-lucide="arrow-left" className="w-4 h-4"></i> Volver a Crear
-                                        </button>
-                                        <h2 className="text-2xl font-bold font-montserrat">Oferta Publicitaria</h2>
-                                        <p className="text-white/50 text-sm">Lote: {results.timestamp}</p>
-                                    </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                                {results.proposals[activeProposalIdx].assets.map((asset, index) => (
+                                    <div key={asset.id} className="result-card group glass overflow-hidden rounded-2xl relative min-h-[300px] flex items-center justify-center bg-white/5">
+                                        {asset.loading ? (
+                                            <div className="flex flex-col items-center justify-center p-4">
+                                                <div className="spinner-triple scale-50" style={{ marginBottom: '10px' }}>
+                                                    <div className="ring ring-1"></div>
+                                                    <div className="ring ring-2"></div>
+                                                    <div className="ring ring-3"></div>
+                                                </div>
+                                                <span className="loading-text text-[10px] mt-4 font-bold text-center">{(asset.label && asset.label.startsWith('VIDEO') && videoStatus) ? videoStatus : 'GENERANDO...'}</span>
+                                            </div>
+                                        ) : asset.videoUrl ? (
+                                            <video src={asset.videoUrl} className="w-full aspect-[4/5] object-cover" muted autoPlay loop />
+                                        ) : (
+                                            <img src={asset.url} className="w-full aspect-[4/5] object-cover cursor-zoom-in transition-transform duration-500 group-hover:scale-105" onClick={() => setLightboxItem(asset)} />
+                                        )}
 
-                                    {/* Tabs de Propuestas - Solo si hay más de una */}
-                                    {results.proposals.length > 1 && (
-                                        <div className="flex glass p-1 rounded-xl">
-                                            {results.proposals.map((prop, idx) => (
-                                                <button
-                                                    key={idx}
-                                                    onClick={() => setActiveProposalIdx(idx)}
-                                                    className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeProposalIdx === idx ? 'bg-cyan-500 text-white shadow-lg' : 'text-white/60 hover:text-white'}`}
-                                                >
-                                                    {prop.label}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
+                                        {asset.error && (
+                                            <div className="absolute top-4 right-4 bg-red-600/90 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg z-10 pointer-events-none border border-red-500/50">
+                                                <i data-lucide="alert-circle" className="w-3 h-3 inline-block mr-1"></i>
+                                                ERROR
+                                            </div>
+                                        )}
 
-                                    <div className="flex gap-4">
-                                        <button className="glass-white px-5 py-2 rounded-xl flex items-center gap-2 text-sm font-bold hover:bg-white/10" onClick={() => {
-                                            const assets = results.proposals[activeProposalIdx].assets.filter(a => !a.loading && (a.url || a.videoUrl));
-                                            assets.forEach((asset, i) => setTimeout(() => downloadAsset(asset), i * 300));
-                                        }}>
-                                            <i data-lucide="download-cloud" className="w-4 h-4"></i> Exportar Todo
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                                    {results.proposals[activeProposalIdx].assets.map((asset, index) => (
-                                        <div key={asset.id} className="result-card group glass overflow-hidden rounded-2xl relative min-h-[300px] flex items-center justify-center bg-white/5">
-                                            {asset.loading ? (
-                                                <div className="flex flex-col items-center justify-center p-4">
-                                                    <div className="spinner-triple scale-50" style={{ marginBottom: '10px' }}>
-                                                        <div className="ring ring-1"></div>
-                                                        <div className="ring ring-2"></div>
-                                                        <div className="ring ring-3"></div>
+                                        {/* Overlay Controles */}
+                                        {!asset.loading && (
+                                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-all flex flex-col justify-between p-4 pointer-events-none">
+                                                <div className="flex justify-between items-start pointer-events-auto">
+                                                    <div className="bg-black/60 backdrop-blur-md px-2 py-1 rounded text-[9px] font-bold text-white/80 border border-white/10 uppercase">
+                                                        {asset.label}
                                                     </div>
-                                                    <span className="loading-text text-[10px] mt-4 font-bold text-center">{(asset.label && asset.label.startsWith('VIDEO') && videoStatus) ? videoStatus : 'GENERANDO...'}</span>
-                                                </div>
-                                            ) : asset.videoUrl ? (
-                                                <div className="relative w-full aspect-[4/5] cursor-pointer group-hover:scale-105 transition-transform duration-500 overflow-hidden" onClick={() => setLightboxItem(asset)}>
-                                                    <video src={asset.videoUrl} className="w-full h-full object-cover" muted autoPlay loop playsInline />
-                                                    <div className="absolute inset-0 bg-black/10 group-hover:bg-black/30 transition-all flex items-center justify-center">
-                                                        <div className="w-12 h-12 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 text-white/80 group-hover:text-white group-hover:scale-110 transition-all shadow-lg">
-                                                            <i data-lucide="play" className="w-5 h-5 ml-1"></i>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <img src={asset.url} className="w-full aspect-[4/5] object-cover cursor-zoom-in transition-transform duration-500 group-hover:scale-105" onClick={() => setLightboxItem(asset)} />
-                                            )}
-
-                                            {asset.error && (
-                                                <div className="absolute top-4 right-4 bg-red-600/90 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg z-10 pointer-events-none border border-red-500/50">
-                                                    <i data-lucide="alert-circle" className="w-3 h-3 inline-block mr-1"></i>
-                                                    ERROR
-                                                </div>
-                                            )}
-
-                                            {/* Overlay Controles */}
-                                            {!asset.loading && (
-                                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-all flex flex-col justify-between p-4 pointer-events-none">
-                                                    <div className="flex justify-between items-start pointer-events-auto">
-                                                        <div className="bg-black/60 backdrop-blur-md px-2 py-1 rounded text-[9px] font-bold text-white/80 border border-white/10 uppercase">
-                                                            {asset.label}
-                                                        </div>
-                                                        <div className="flex gap-2">
-                                                            {!asset.videoUrl && !asset.id.startsWith('vid_') && (
-                                                                <button
-                                                                    onClick={() => triggerRegenerate(activeProposalIdx, index)}
-                                                                    className="w-8 h-8 rounded-full bg-indigo-600/80 hover:bg-indigo-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
-                                                                >
-                                                                    <i data-lucide="refresh-cw" className="w-4 h-4 text-white"></i>
-                                                                    <span className="tooltip">Regenerar Imagen</span>
-                                                                </button>
-                                                            )}
-                                                            {!asset.videoUrl ? (
-                                                                <button
-                                                                    onClick={() => triggerVideoGeneration(activeProposalIdx, index)}
-                                                                    className="w-8 h-8 rounded-full bg-fuchsia-600/80 hover:bg-fuchsia-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
-                                                                >
-                                                                    <i data-lucide="video" className="w-4 h-4 text-white"></i>
-                                                                    <span className="tooltip">{asset.id.startsWith('vid_') ? "Reintentar Vídeo" : "Generar Video"}</span>
-                                                                </button>
-                                                            ) : (
-                                                                <button
-                                                                    onClick={() => setLightboxItem(asset)}
-                                                                    className="w-8 h-8 rounded-full bg-fuchsia-600/80 hover:bg-fuchsia-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
-                                                                >
-                                                                    <i data-lucide="maximize" className="w-4 h-4 text-white"></i>
-                                                                    <span className="tooltip">Ver Video</span>
-                                                                </button>
-                                                            )}
+                                                    <div className="flex gap-2">
+                                                        {!asset.videoUrl && !asset.id.startsWith('vid_') && (
                                                             <button
-                                                                onClick={() => downloadAsset(asset)}
-                                                                className="w-8 h-8 rounded-full bg-cyan-600/80 hover:bg-cyan-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
+                                                                onClick={() => triggerRegenerate(activeProposalIdx, index)}
+                                                                className="w-8 h-8 rounded-full bg-indigo-600/80 hover:bg-indigo-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
                                                             >
-                                                                <i data-lucide="download" className="w-4 h-4 text-white"></i>
-                                                                <span className="tooltip">Descargar</span>
+                                                                <i data-lucide="refresh-cw" className="w-4 h-4 text-white"></i>
+                                                                <span className="tooltip">Regenerar Imagen</span>
                                                             </button>
-                                                        </div>
-                                                    </div>
-
-                                                    <div className="flex justify-end pointer-events-auto">
-                                                        {/* Espacio reservado para acciones inferiores si fueran necesarias */}
+                                                        )}
+                                                        {!asset.videoUrl ? (
+                                                            <button
+                                                                onClick={() => triggerVideoGeneration(activeProposalIdx, index)}
+                                                                className="w-8 h-8 rounded-full bg-fuchsia-600/80 hover:bg-fuchsia-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
+                                                            >
+                                                                <i data-lucide="video" className="w-4 h-4 text-white"></i>
+                                                                <span className="tooltip">{asset.id.startsWith('vid_') ? "Reintentar Vídeo" : "Generar Video"}</span>
+                                                            </button>
+                                                        ) : (
+                                                            <button
+                                                                onClick={() => setLightboxItem(asset)}
+                                                                className="w-8 h-8 rounded-full bg-fuchsia-600/80 hover:bg-fuchsia-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
+                                                            >
+                                                                <i data-lucide="maximize" className="w-4 h-4 text-white"></i>
+                                                                <span className="tooltip">Ver Video</span>
+                                                            </button>
+                                                        )}
+                                                        <button
+                                                            onClick={() => downloadAsset(asset)}
+                                                            className="w-8 h-8 rounded-full bg-cyan-600/80 hover:bg-cyan-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
+                                                        >
+                                                            <i data-lucide="download" className="w-4 h-4 text-white"></i>
+                                                            <span className="tooltip">Descargar</span>
+                                                        </button>
                                                     </div>
                                                 </div>
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                </main>
 
-                {/* Lightbox Simplificado: Imagen o Video */}
-                {lightboxItem && (
-                    <div className="lightbox cursor-zoom-out" onClick={() => setLightboxItem(null)}>
-                        <div className="relative max-w-[95vw] max-h-[95vh] flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
-                            {lightboxItem.videoUrl ? (
-                                <video
-                                    src={lightboxItem.videoUrl}
-                                    className="max-h-[85vh] w-auto rounded-lg shadow-2xl border border-white/10"
-                                    controls
-                                    autoPlay
+                                                <div className="flex justify-end pointer-events-auto">
+                                                    {/* Espacio reservado para acciones inferiores si fueran necesarias */}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </main>
+
+            {/* Lightbox Simplificado: Imagen o Video */}
+            {lightboxItem && (
+                <div className="lightbox cursor-zoom-out" onClick={() => setLightboxItem(null)}>
+                    <div className="relative max-w-[95vw] max-h-[95vh] flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+                        {lightboxItem.videoUrl ? (
+                            <video
+                                src={lightboxItem.videoUrl}
+                                className="max-h-[85vh] w-auto rounded-lg shadow-2xl border border-white/10"
+                                controls
+                                autoPlay
+                            />
+                        ) : (
+                            <img
+                                src={lightboxItem.url}
+                                className="max-h-[85vh] w-auto rounded-lg shadow-[0_0_50px_rgba(0,0,0,0.8)] border border-white/5"
+                                onClick={() => setLightboxItem(null)}
+                            />
+                        )}
+                        <button
+                            className="absolute -top-12 right-0 text-white/60 hover:text-white transition-all p-2"
+                            onClick={() => setLightboxItem(null)}
+                        >
+                            <i data-lucide="x" className="w-8 h-8"></i>
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal de Calidad de Vídeo */}
+            {videoQualityModal && (
+                <div className="lightbox flex items-center justify-center fade-in z-50 p-4" onClick={() => setVideoQualityModal(null)}>
+                    <div className="glass-white p-8 rounded-2xl max-w-md w-full relative" onClick={e => e.stopPropagation()}>
+                        <button className="absolute top-4 right-4 text-white/50 hover:text-white" onClick={() => setVideoQualityModal(null)}>
+                            <i data-lucide="x" className="w-5 h-5"></i>
+                        </button>
+
+                        <div className="flex justify-center mb-6">
+                            <div className="w-16 h-16 rounded-full bg-fuchsia-500/20 flex items-center justify-center">
+                                <i data-lucide="video" className="w-8 h-8 text-fuchsia-400"></i>
+                            </div>
+                        </div>
+
+                        <h3 className="text-2xl font-bold font-montserrat text-center mb-2">Generar Vídeo con Veo 3.1</h3>
+                        <p className="text-white/70 text-center mb-6 text-sm">Añade instrucciones para dirigir a la IA Veo sobre el encuadre o movimiento.</p>
+
+                        <div className="mb-6">
+                            <label className="text-xs font-bold text-white/50 uppercase tracking-widest mb-2 block">Prompt Visual de Vídeo</label>
+                            <textarea
+                                value={videoQualityModal.prompt}
+                                onChange={e => setVideoQualityModal({ ...videoQualityModal, prompt: e.target.value })}
+                                className="w-full bg-black/40 border border-white/20 rounded-xl p-3 h-[80px] focus:outline-none focus:border-fuchsia-400 text-white text-sm resize-none"
+                                placeholder="Describe el movimiento de cámara, los efectos..."
+                            />
+                        </div>
+
+                        <div className="mb-6">
+                            <label className="text-xs font-bold text-white/50 uppercase tracking-widest mb-2 flex items-center gap-2">
+                                <i data-lucide="music" className="w-4 h-4"></i>
+                                Audio del Vídeo (Opcional)
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer mb-3">
+                                <input
+                                    type="checkbox"
+                                    checked={videoQualityModal.generateAudio}
+                                    onChange={e => setVideoQualityModal({ ...videoQualityModal, generateAudio: e.target.checked })}
+                                    className="accent-fuchsia-500 w-4 h-4 cursor-pointer"
                                 />
-                            ) : (
-                                <img
-                                    src={lightboxItem.url}
-                                    className="max-h-[85vh] w-auto rounded-lg shadow-[0_0_50px_rgba(0,0,0,0.8)] border border-white/5"
-                                    onClick={() => setLightboxItem(null)}
+                                <span className="text-sm text-white/80 select-none">Generar pista de audio con IA</span>
+                            </label>
+
+                            {videoQualityModal.generateAudio && (
+                                <textarea
+                                    value={videoQualityModal.audioPrompt}
+                                    onChange={e => setVideoQualityModal({ ...videoQualityModal, audioPrompt: e.target.value })}
+                                    className="w-full bg-black/40 border border-white/20 rounded-xl p-3 h-[60px] focus:outline-none focus:border-fuchsia-400 text-white text-sm resize-none fade-in"
+                                    placeholder="Describe la música, efectos sonoros o estilo de audio..."
                                 />
                             )}
+                        </div>
+
+                        <div className="space-y-3">
                             <button
-                                className="absolute -top-12 right-0 text-white/60 hover:text-white transition-all p-2"
-                                onClick={() => setLightboxItem(null)}
+                                onClick={() => confirmVideoGeneration(true)}
+                                className="w-full flex items-center justify-between p-4 rounded-xl border border-fuchsia-500/50 bg-fuchsia-500/10 hover:bg-fuchsia-500/20 transition-all group"
                             >
-                                <i data-lucide="x" className="w-8 h-8"></i>
+                                <div className="text-left">
+                                    <div className="font-bold flex items-center gap-2 text-fuchsia-400">
+                                        <i data-lucide="sparkles" className="w-4 h-4"></i>
+                                        Calidad Standard
+                                    </div>
+                                    <div className="text-xs text-white/60 mt-1">Máximo detalle y calidad visual. Recomendado para entrega final.</div>
+                                </div>
+                                <div className="font-mono font-bold text-fuchsia-300">~$0.40/s</div>
+                            </button>
+
+                            <button
+                                onClick={() => confirmVideoGeneration(false)}
+                                className="w-full flex items-center justify-between p-4 rounded-xl border border-cyan-500/50 bg-cyan-500/10 hover:bg-cyan-500/20 transition-all group"
+                            >
+                                <div className="text-left">
+                                    <div className="font-bold flex items-center gap-2 text-cyan-400">
+                                        <i data-lucide="zap" className="w-4 h-4"></i>
+                                        Calidad Fast
+                                    </div>
+                                    <div className="text-xs text-white/60 mt-1">Más rápido y económico. Ideal para iteraciones y experimentación.</div>
+                                </div>
+                                <div className="font-mono font-bold text-cyan-300">~$0.15/s</div>
                             </button>
                         </div>
+
+                        <button
+                            onClick={() => setVideoQualityModal(null)}
+                            className="w-full mt-6 py-3 rounded-xl border border-white/10 hover:bg-white/5 transition-all font-bold text-sm text-white/60 hover:text-white"
+                        >
+                            Cancelar
+                        </button>
                     </div>
-                )}
+                </div>
+            )}
 
-                {/* Modal de Calidad de Vídeo */}
-                {videoQualityModal && (
-                    <div className="lightbox flex items-center justify-center fade-in z-50 p-4" onClick={() => setVideoQualityModal(null)}>
-                        <div className="glass-white p-8 rounded-2xl max-w-md w-full relative" onClick={e => e.stopPropagation()}>
-                            <button className="absolute top-4 right-4 text-white/50 hover:text-white" onClick={() => setVideoQualityModal(null)}>
-                                <i data-lucide="x" className="w-5 h-5"></i>
-                            </button>
+            {/* Modal de Regeneración de Imagen con Prompt */}
+            {regenerateModal && (
+                <div className="lightbox flex items-center justify-center fade-in z-50 p-4" onClick={() => setRegenerateModal(null)}>
+                    <div className="glass-white p-8 rounded-2xl max-w-md w-full relative" onClick={e => e.stopPropagation()}>
+                        <button className="absolute top-4 right-4 text-white/50 hover:text-white" onClick={() => setRegenerateModal(null)}>
+                            <i data-lucide="x" className="w-5 h-5"></i>
+                        </button>
 
-                            <div className="flex justify-center mb-6">
-                                <div className="w-16 h-16 rounded-full bg-fuchsia-500/20 flex items-center justify-center">
-                                    <i data-lucide="video" className="w-8 h-8 text-fuchsia-400"></i>
-                                </div>
+                        <div className="flex justify-center mb-6">
+                            <div className="w-16 h-16 rounded-full bg-indigo-500/20 flex items-center justify-center">
+                                <i data-lucide="refresh-cw" className="w-8 h-8 text-indigo-400"></i>
                             </div>
+                        </div>
 
-                            <h3 className="text-2xl font-bold font-montserrat text-center mb-2">Generar Vídeo con Veo 3.1</h3>
-                            <p className="text-white/70 text-center mb-6 text-sm">Añade instrucciones para dirigir a la IA Veo sobre el encuadre o movimiento.</p>
+                        <h3 className="text-2xl font-bold font-montserrat text-center mb-2">Regenerar Imagen</h3>
+                        <p className="text-white/70 text-center mb-6 text-sm">Modifica o añade instrucciones al prompt para guiar a la IA en esta nueva versión.</p>
 
-                            <div className="mb-6">
-                                <label className="text-xs font-bold text-white/50 uppercase tracking-widest mb-2 block">Prompt Visual de Vídeo</label>
-                                <textarea
-                                    value={videoQualityModal.prompt}
-                                    onChange={e => setVideoQualityModal({ ...videoQualityModal, prompt: e.target.value })}
-                                    className="w-full bg-black/40 border border-white/20 rounded-xl p-3 h-[80px] focus:outline-none focus:border-fuchsia-400 text-white text-sm resize-none"
-                                    placeholder="Describe el movimiento de cámara, los efectos..."
-                                />
-                            </div>
+                        <textarea
+                            value={regenerateModal.prompt}
+                            onChange={e => setRegenerateModal({ ...regenerateModal, prompt: e.target.value })}
+                            className="w-full bg-black/40 border border-white/20 rounded-xl p-4 min-h-[120px] focus:outline-none focus:border-indigo-400 text-white text-sm mb-6 resize-none"
+                            placeholder="Describe cómo quieres que se vea..."
+                        />
 
-                            <div className="mb-6">
-                                <label className="text-xs font-bold text-white/50 uppercase tracking-widest mb-2 flex items-center gap-2">
-                                    <i data-lucide="music" className="w-4 h-4"></i>
-                                    Audio del Vídeo (Opcional)
-                                </label>
-                                <label className="flex items-center gap-2 cursor-pointer mb-3">
-                                    <input
-                                        type="checkbox"
-                                        checked={videoQualityModal.generateAudio}
-                                        onChange={e => setVideoQualityModal({ ...videoQualityModal, generateAudio: e.target.checked })}
-                                        className="accent-fuchsia-500 w-4 h-4 cursor-pointer"
-                                    />
-                                    <span className="text-sm text-white/80 select-none">Generar pista de audio con IA</span>
-                                </label>
-
-                                {videoQualityModal.generateAudio && (
-                                    <textarea
-                                        value={videoQualityModal.audioPrompt}
-                                        onChange={e => setVideoQualityModal({ ...videoQualityModal, audioPrompt: e.target.value })}
-                                        className="w-full bg-black/40 border border-white/20 rounded-xl p-3 h-[60px] focus:outline-none focus:border-fuchsia-400 text-white text-sm resize-none fade-in"
-                                        placeholder="Describe la música, efectos sonoros o estilo de audio..."
-                                    />
-                                )}
-                            </div>
-
-                            <div className="space-y-3">
-                                <button
-                                    onClick={() => confirmVideoGeneration(true)}
-                                    className="w-full flex items-center justify-between p-4 rounded-xl border border-fuchsia-500/50 bg-fuchsia-500/10 hover:bg-fuchsia-500/20 transition-all group"
-                                >
-                                    <div className="text-left">
-                                        <div className="font-bold flex items-center gap-2 text-fuchsia-400">
-                                            <i data-lucide="sparkles" className="w-4 h-4"></i>
-                                            Calidad Standard
-                                        </div>
-                                        <div className="text-xs text-white/60 mt-1">Máximo detalle y calidad visual. Recomendado para entrega final.</div>
-                                    </div>
-                                    <div className="font-mono font-bold text-fuchsia-300">~$0.40/s</div>
-                                </button>
-
-                                <button
-                                    onClick={() => confirmVideoGeneration(false)}
-                                    className="w-full flex items-center justify-between p-4 rounded-xl border border-cyan-500/50 bg-cyan-500/10 hover:bg-cyan-500/20 transition-all group"
-                                >
-                                    <div className="text-left">
-                                        <div className="font-bold flex items-center gap-2 text-cyan-400">
-                                            <i data-lucide="zap" className="w-4 h-4"></i>
-                                            Calidad Fast
-                                        </div>
-                                        <div className="text-xs text-white/60 mt-1">Más rápido y económico. Ideal para iteraciones y experimentación.</div>
-                                    </div>
-                                    <div className="font-mono font-bold text-cyan-300">~$0.15/s</div>
-                                </button>
-                            </div>
-
+                        <div className="flex gap-3">
                             <button
-                                onClick={() => setVideoQualityModal(null)}
-                                className="w-full mt-6 py-3 rounded-xl border border-white/10 hover:bg-white/5 transition-all font-bold text-sm text-white/60 hover:text-white"
+                                onClick={() => setRegenerateModal(null)}
+                                className="flex-1 py-3 rounded-xl border border-white/10 hover:bg-white/5 transition-all text-sm font-bold text-white/70 hover:text-white"
                             >
                                 Cancelar
                             </button>
-                        </div>
-                    </div>
-                )}
-
-                {/* Modal de Regeneración de Imagen con Prompt */}
-                {regenerateModal && (
-                    <div className="lightbox flex items-center justify-center fade-in z-50 p-4" onClick={() => setRegenerateModal(null)}>
-                        <div className="glass-white p-8 rounded-2xl max-w-md w-full relative" onClick={e => e.stopPropagation()}>
-                            <button className="absolute top-4 right-4 text-white/50 hover:text-white" onClick={() => setRegenerateModal(null)}>
-                                <i data-lucide="x" className="w-5 h-5"></i>
+                            <button
+                                onClick={() => {
+                                    /* El estado de loading indica a React que empiece; el botón debe dispararlo y cerrarse solo si hay confirmación, confirmRegenerate hace exactamente eso. */
+                                    confirmRegenerate();
+                                }}
+                                className="flex-1 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 transition-all text-sm font-bold shadow-lg shadow-indigo-500/30 flex items-center justify-center gap-2"
+                            >
+                                <i data-lucide="wand-2" className="w-4 h-4"></i>
+                                Generar
                             </button>
-
-                            <div className="flex justify-center mb-6">
-                                <div className="w-16 h-16 rounded-full bg-indigo-500/20 flex items-center justify-center">
-                                    <i data-lucide="refresh-cw" className="w-8 h-8 text-indigo-400"></i>
-                                </div>
-                            </div>
-
-                            <h3 className="text-2xl font-bold font-montserrat text-center mb-2">Regenerar Imagen</h3>
-                            <p className="text-white/70 text-center mb-6 text-sm">Modifica o añade instrucciones al prompt para guiar a la IA en esta nueva versión.</p>
-
-                            <textarea
-                                value={regenerateModal.prompt}
-                                onChange={e => setRegenerateModal({ ...regenerateModal, prompt: e.target.value })}
-                                className="w-full bg-black/40 border border-white/20 rounded-xl p-4 min-h-[120px] focus:outline-none focus:border-indigo-400 text-white text-sm mb-6 resize-none"
-                                placeholder="Describe cómo quieres que se vea..."
-                            />
-
-                            <div className="flex gap-3">
-                                <button
-                                    onClick={() => setRegenerateModal(null)}
-                                    className="flex-1 py-3 rounded-xl border border-white/10 hover:bg-white/5 transition-all text-sm font-bold text-white/70 hover:text-white"
-                                >
-                                    Cancelar
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        /* El estado de loading indica a React que empiece; el botón debe dispararlo y cerrarse solo si hay confirmación, confirmRegenerate hace exactamente eso. */
-                                        confirmRegenerate();
-                                    }}
-                                    className="flex-1 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 transition-all text-sm font-bold shadow-lg shadow-indigo-500/30 flex items-center justify-center gap-2"
-                                >
-                                    <i data-lucide="wand-2" className="w-4 h-4"></i>
-                                    Generar
-                                </button>
-                            </div>
                         </div>
                     </div>
-                )}
-            </div>
-        );
-    }
+                </div>
+            )}
+        </div>
+    );
+}
 
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);

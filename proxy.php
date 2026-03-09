@@ -134,7 +134,7 @@ if ($action === 'generate_image') {
 
 // ─── ACCIÓN: Iniciar generación de vídeo con Veo ────────────
 if ($action === 'generate_video') {
-    $model = 'veo-3.0-generate-preview';
+    $model = (string)($req['model'] ?? 'veo-3.1-generate-preview');
     $prompt = trim((string)($req['prompt'] ?? 'Cinematic product video'));
     $imageB64 = (string)($req['base64ImageData'] ?? '');
     $mime = (string)($req['mimeType'] ?? 'image/png');

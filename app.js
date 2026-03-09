@@ -51,13 +51,27 @@ function loadHistoryFromDB() {
 }
 
 function saveHistoryToDB(historyArray) {
-    // Limpiar blob URLs antes de guardar (no son persistentes)
-    var cleanArray = JSON.parse(JSON.stringify(historyArray, function (key, value) {
-        if (key === 'videoUrl' && typeof value === 'string' && value.startsWith('blob:')) {
-            return null;
+    // Para guardar en IndexedDB, podemos guardar Blobs directamente.
+    // Solo eliminamos las blob URLs (strings) que no sirven para nada después de recargar.
+    const cleanArray = historyArray.map(item => {
+        const newItem = { ...item };
+        if (newItem.proposals) {
+            newItem.proposals = newItem.proposals.map(prop => ({
+                ...prop,
+                assets: prop.assets.map(asset => {
+                    const newAsset = { ...asset };
+                    // Si tenemos una blob URL, nos aseguramos de que el blob esté guardado (si existe)
+                    if (newAsset.videoUrl && typeof newAsset.videoUrl === 'string' && newAsset.videoUrl.startsWith('blob:')) {
+                        // Conservamos el asset.videoBlob si lo tiene
+                        newAsset.videoUrl = null;
+                    }
+                    return newAsset;
+                })
+            }));
         }
-        return value;
-    }));
+        return newItem;
+    });
+
     return openDB().then(function (db) {
         return new Promise(function (resolve, reject) {
             var tx = db.transaction(DB_STORE, 'readwrite');
@@ -208,7 +222,10 @@ function generateVideoWithVeo(imageDataUrl, prompt, modelName, generateAudio, au
             var bytes = new Uint8Array(binary.length);
             for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
             var blob = new Blob([bytes], { type: data.mimeType || 'video/mp4' });
-            return URL.createObjectURL(blob);
+            return {
+                blob: blob,
+                url: URL.createObjectURL(blob)
+            };
         });
 }
 
@@ -231,7 +248,22 @@ function App() {
 
     useEffect(() => {
         loadHistoryFromDB().then(function (saved) {
-            if (saved && saved.length > 0) setHistory(saved);
+            if (saved && saved.length > 0) {
+                // Restaurar Blob URLs para los vídeos persistidos
+                const restored = saved.map(item => {
+                    if (item.proposals) {
+                        item.proposals.forEach(prop => {
+                            prop.assets.forEach(asset => {
+                                if (asset.videoBlob instanceof Blob) {
+                                    asset.videoUrl = URL.createObjectURL(asset.videoBlob);
+                                }
+                            });
+                        });
+                    }
+                    return item;
+                });
+                setHistory(restored);
+            }
             historyLoaded.current = true;
         });
     }, []);
@@ -332,9 +364,9 @@ function App() {
                 const imageUrl = await callGeminiImage(prompt, imagePreview);
 
                 setResults(prev => {
-                    const updated = JSON.parse(JSON.stringify(prev)); // Deep copy para forzar re-render
-                    updated.proposals[0].assets[i].url = imageUrl || 'https://via.placeholder.com/800x1000?text=Error+al+generar';
-                    updated.proposals[0].assets[i].loading = false;
+                    const updated = { ...prev, proposals: [...prev.proposals] };
+                    updated.proposals[0] = { ...updated.proposals[0], assets: [...updated.proposals[0].assets] };
+                    updated.proposals[0].assets[i] = { ...updated.proposals[0].assets[i], url: imageUrl || 'https://via.placeholder.com/800x1000?text=Error+al+generar', loading: false };
                     return updated;
                 });
             }
@@ -366,13 +398,16 @@ function App() {
 
         const originalUrl = currentAsset.url;
 
-        // Clone prevent reference mutation
-        const newResults = JSON.parse(JSON.stringify(results));
-        const asset = newResults.proposals[proposalIdx].assets[assetIdx];
-
-        asset.loading = true;
-        asset.url = null;
-        asset.prompt = prompt; // Actualizamos el prompt con la versión del usuario
+        // Clonación manual para no romper Blobs
+        const newResults = { ...results, proposals: [...results.proposals] };
+        newResults.proposals[proposalIdx] = { ...newResults.proposals[proposalIdx], assets: [...newResults.proposals[proposalIdx].assets] };
+        newResults.proposals[proposalIdx].assets[assetIdx] = {
+            ...newResults.proposals[proposalIdx].assets[assetIdx],
+            loading: true,
+            url: null,
+            prompt: prompt,
+            videoUrl: null
+        };
         setResults(newResults);
 
         const strictPrompt = prompt.trim() === ''
@@ -382,15 +417,16 @@ function App() {
         const newUrl = await callGeminiImage(strictPrompt, originalUrl);
 
         if (newUrl) {
-            asset.url = newUrl;
+            newResults.proposals[proposalIdx].assets[assetIdx].url = newUrl;
         } else {
             console.error("Regeneration failed, reverting to previous image.");
-            asset.url = originalUrl;
+            newResults.proposals[proposalIdx].assets[assetIdx].url = originalUrl;
             alert('Falló la regeneración de la imagen. Por favor, intenta de nuevo.');
         }
 
-        asset.loading = false;
-        asset.videoUrl = null;
+        newResults.proposals[proposalIdx].assets[assetIdx].loading = false;
+        newResults.proposals[proposalIdx].assets[assetIdx].videoUrl = null;
+        newResults.proposals[proposalIdx].assets[assetIdx].videoBlob = null; // Limpiar blob si existía
 
         setResults(newResults);
         setHistory(prev => prev.map(item => item.id === results.id ? newResults : item));
@@ -418,15 +454,16 @@ function App() {
 
         const newVideoId = `vid_${Date.now()}`;
 
-        // Añadimos tarjeta en estado "cargando"
+        // Añadimos tarjeta en estado "cargando" con clonación segura
         setResults(prev => {
-            const updated = JSON.parse(JSON.stringify(prev));
+            const updated = { ...prev, proposals: [...prev.proposals] };
+            updated.proposals[proposalIdx] = { ...updated.proposals[proposalIdx], assets: [...updated.proposals[proposalIdx].assets] };
             updated.proposals[proposalIdx].assets.push({
                 id: newVideoId,
                 styleId: currentAsset.styleId,
                 label: `VIDEO: ${currentAsset.label}`,
                 url: currentAsset.url,
-                prompt: prompt, // Actualizamos con la nueva instrucción visual
+                prompt: prompt,
                 videoUrl: null,
                 loading: true
             });
@@ -439,7 +476,7 @@ function App() {
             // Componemos el super-prompt visual
             const videoPrompt = `Smooth cinematic product video, subtle motion, professional lighting, slow elegant movement, commercial quality. ${prompt}`;
 
-            const videoUrl = await generateVideoWithVeo(
+            const resultData = await generateVideoWithVeo(
                 currentAsset.url,
                 videoPrompt,
                 selectedModel,
@@ -449,13 +486,19 @@ function App() {
             );
 
             setResults(prev => {
-                const updated = JSON.parse(JSON.stringify(prev));
+                const updated = { ...prev, proposals: [...prev.proposals] };
+                updated.proposals[proposalIdx] = { ...updated.proposals[proposalIdx], assets: [...updated.proposals[proposalIdx].assets] };
                 const vIdx = updated.proposals[proposalIdx].assets.findIndex(a => a.id === newVideoId);
                 if (vIdx !== -1) {
-                    updated.proposals[proposalIdx].assets[vIdx].videoUrl = videoUrl;
-                    updated.proposals[proposalIdx].assets[vIdx].loading = false;
+                    updated.proposals[proposalIdx].assets[vIdx] = {
+                        ...updated.proposals[proposalIdx].assets[vIdx],
+                        videoUrl: resultData.url,
+                        videoBlob: resultData.blob,
+                        loading: false
+                    };
                 }
-                setHistory(prevHist => prevHist.map(item => item.id === updated.id ? updated : item));
+                const finalBatch = updated;
+                setHistory(prevHist => prevHist.map(item => item.id === finalBatch.id ? finalBatch : item));
                 return updated;
             });
             setVideoStatus('');
@@ -646,7 +689,7 @@ function App() {
                                                 <span className="loading-text text-[10px] mt-4 font-bold text-center">{(asset.label && asset.label.startsWith('VIDEO') && videoStatus) ? videoStatus : 'GENERANDO...'}</span>
                                             </div>
                                         ) : asset.videoUrl ? (
-                                            <video src={asset.videoUrl} className="w-full aspect-[4/5] object-cover" muted autoPlay loop />
+                                            <video src={asset.videoUrl} className="w-full aspect-[4/5] object-cover cursor-pointer" muted autoPlay loop onClick={() => setLightboxItem(asset)} />
                                         ) : (
                                             <img src={asset.url} className="w-full aspect-[4/5] object-cover cursor-zoom-in transition-transform duration-500 group-hover:scale-105" onClick={() => setLightboxItem(asset)} />
                                         )}

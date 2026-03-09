@@ -186,14 +186,14 @@ function generateVideoWithVeo(imageDataUrl, prompt, modelName, generateAudio, au
                 }).then(function (res) {
                     return res.json();
                 }).then(function (status) {
+                    if (status.error) {
+                        throw new Error('Error de Veo: ' + (status.error.message || JSON.stringify(status.error)));
+                    }
                     if (status.done === true) {
                         var videoUri = null;
                         try { videoUri = status.response.generateVideoResponse.generatedSamples[0].video.uri; } catch (e) { }
-                        if (!videoUri) throw new Error('Vídeo generado pero sin URI.');
+                        if (!videoUri) throw new Error('Vídeo generado pero sin URI. RAW: ' + JSON.stringify(status));
                         return videoUri;
-                    }
-                    if (status.error) {
-                        throw new Error('Error de Veo: ' + (status.error.message || JSON.stringify(status.error)));
                     }
                     return pollOperation();
                 });

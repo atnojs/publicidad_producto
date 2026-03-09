@@ -60,9 +60,7 @@ function saveHistoryToDB(historyArray) {
                 ...prop,
                 assets: prop.assets.map(asset => {
                     const newAsset = { ...asset };
-                    // Si tenemos una blob URL, nos aseguramos de que el blob esté guardado (si existe)
-                    if (newAsset.videoUrl && typeof newAsset.videoUrl === 'string' && newAsset.videoUrl.startsWith('blob:')) {
-                        // Conservamos el asset.videoBlob si lo tiene
+                    if (newAsset.videoUrl && typeof newAsset.videoUrl === 'string' && (newAsset.videoUrl.startsWith('blob:') || newAsset.videoUrl.startsWith('data:'))) {
                         newAsset.videoUrl = null;
                     }
                     return newAsset;
@@ -259,11 +257,8 @@ function App() {
                                 // Si usamos el nuevo sistema de base64
                                 if (asset.videoBase64) {
                                     try {
-                                        const binary = atob(asset.videoBase64);
-                                        const bytes = new Uint8Array(binary.length);
-                                        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-                                        const blob = new Blob([bytes], { type: asset.videoMimeType || 'video/mp4' });
-                                        asset.videoUrl = URL.createObjectURL(blob);
+                                        asset.videoUrl = 'data:' + (asset.videoMimeType || 'video/mp4') + ';base64,' + asset.videoBase64;
+                                        console.log('Video restaurado desde base64 (Data URI) con éxito');
                                     } catch (e) {
                                         console.error('Error restaurando video desde base64:', e);
                                     }

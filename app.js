@@ -371,7 +371,7 @@ function App() {
             // Generar imágenes progresivamente para la propuesta única
             for (let i = 0; i < AD_STYLES.length; i++) {
                 const style = AD_STYLES[i];
-                const prompt = `${description}. ${style.promptSuffix}`;
+                const prompt = `${description}. ${style.promptSuffix}. IMPORTANTE: Cualquier texto que generes o aparezca en la imagen DEBE estar siempre en español.`;
 
                 // Llamada real a la API
                 const imageUrl = await callGeminiImage(prompt, imagePreview);
@@ -423,9 +423,9 @@ function App() {
         };
         setResults(newResults);
 
-        const strictPrompt = prompt.trim() === ''
+        const strictPrompt = (prompt.trim() === ''
             ? "Create a completely new, highly creative and visually striking product advertising variation using the reference image as inspiration."
-            : `CRITICAL INSTRUCTION: You are an expert photo retoucher. Your task is to accurately reproduce the provided reference image while applying ONLY the requested modifications. Do NOT hallucinate entirely new backgrounds, lighting, or compositions unless explicitly requested. Keep the original product perfectly intact. User requested edits: "${prompt}".`;
+            : `CRITICAL INSTRUCTION: You are an expert photo retoucher. Your task is to accurately reproduce the provided reference image while applying ONLY the requested modifications. Do NOT hallucinate entirely new backgrounds, lighting, or compositions unless explicitly requested. Keep the original product perfectly intact. User requested edits: "${prompt}".`) + " IMPORTANT: Any text generated in the image MUST be in Spanish. Cualquier texto generado debe estar en español.";
 
         const newUrl = await callGeminiImage(strictPrompt, originalUrl);
 
@@ -487,7 +487,7 @@ function App() {
             const selectedModel = isStandard ? 'veo-3.1-generate-preview' : 'veo-3.1-fast-generate-preview';
 
             // Componemos el super-prompt visual
-            const videoPrompt = `Smooth cinematic product video, subtle motion, professional lighting, slow elegant movement, commercial quality. ${prompt}`;
+            const videoPrompt = `Smooth cinematic product video, subtle motion, professional lighting, slow elegant movement, commercial quality. IMPORTANTE: Cualquier texto que aparezca en el vídeo DEBE estar en español. ${prompt}`;
 
             const resultData = await generateVideoWithVeo(
                 currentAsset.url,

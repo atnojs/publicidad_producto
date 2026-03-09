@@ -134,17 +134,16 @@ if ($action === 'generate_image') {
 
 // ─── ACCIÓN: Iniciar generación de vídeo con Veo ────────────
 if ($action === 'generate_video') {
-    $model = (string)($req['model'] ?? 'veo-3.1-generate-preview');
+    $model = 'veo-3.0-generate-preview';
     $prompt = trim((string)($req['prompt'] ?? 'Cinematic product video'));
     $imageB64 = (string)($req['base64ImageData'] ?? '');
     $mime = (string)($req['mimeType'] ?? 'image/png');
-    $aspectRatio = (string)($req['aspectRatio'] ?? '9:16');
+    $aspectRatio = (string)($req['aspectRatio'] ?? '16:9');
 
     $endpoint = "{$BASE_URL}/models/{$model}:predictLongRunning";
 
     $instance = ['prompt' => $prompt];
 
-    // Si hay imagen, hacemos image-to-video
     if ($imageB64 !== '') {
         $instance['image'] = [
             'mimeType' => $mime,
@@ -155,14 +154,14 @@ if ($action === 'generate_video') {
     $payload = [
         'instances' => [$instance],
         'parameters' => [
-            'aspectRatio' => $aspectRatio
+            'aspectRatio' => $aspectRatio,
+            'numberOfVideos' => 1
         ]
     ];
 
     if (isset($req['generateAudio']) && $req['generateAudio'] === true) {
         $audioPromptExt = isset($req['audioPrompt']) && trim($req['audioPrompt']) !== '' ? "\n[AUDIO REQUIREMENT]: " . trim($req['audioPrompt']) . "\n" : "";
         $payload['instances'][0]['prompt'] .= $audioPromptExt;
-    // The 'generateAudio' parameter is intentionally not sent here as it's unsupported by the current Veo model endpoint and causes a 400 error.
     }
 
     $res = make_request($endpoint, 'POST', ["x-goog-api-key: {$API_KEY}"], $payload);

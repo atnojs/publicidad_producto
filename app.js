@@ -223,6 +223,8 @@ function generateVideoWithVeo(imageDataUrl, prompt, modelName, generateAudio, au
             for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
             var blob = new Blob([bytes], { type: data.mimeType || 'video/mp4' });
             return {
+                base64: data.videoBase64,
+                mimeType: data.mimeType || 'video/mp4',
                 blob: blob,
                 url: URL.createObjectURL(blob)
             };
@@ -249,13 +251,29 @@ function App() {
     useEffect(() => {
         loadHistoryFromDB().then(function (saved) {
             if (saved && saved.length > 0) {
-                // Restaurar Blob URLs para los vídeos persistidos
+                // Restaurar Blob URLs comprobando base64 o el método antiguo de Blob
                 const restored = saved.map(item => {
                     if (item.proposals) {
                         item.proposals.forEach(prop => {
                             prop.assets.forEach(asset => {
-                                if (asset.videoBlob instanceof Blob) {
-                                    asset.videoUrl = URL.createObjectURL(asset.videoBlob);
+                                // Si usamos el nuevo sistema de base64
+                                if (asset.videoBase64) {
+                                    try {
+                                        const binary = atob(asset.videoBase64);
+                                        const bytes = new Uint8Array(binary.length);
+                                        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                                        const blob = new Blob([bytes], { type: asset.videoMimeType || 'video/mp4' });
+                                        asset.videoUrl = URL.createObjectURL(blob);
+                                    } catch (e) {
+                                        console.error('Error restaurando video desde base64:', e);
+                                    }
+                                } else if (asset.videoBlob) {
+                                    // Fallback para videos guardados justo después del parche anterior
+                                    try {
+                                        asset.videoUrl = URL.createObjectURL(asset.videoBlob);
+                                    } catch (e) {
+                                        console.error('Error restoring video URL:', e);
+                                    }
                                 }
                             });
                         });
@@ -493,7 +511,8 @@ function App() {
                     updated.proposals[proposalIdx].assets[vIdx] = {
                         ...updated.proposals[proposalIdx].assets[vIdx],
                         videoUrl: resultData.url,
-                        videoBlob: resultData.blob,
+                        videoBase64: resultData.base64,
+                        videoMimeType: resultData.mimeType,
                         loading: false
                     };
                 }

@@ -51,25 +51,8 @@ function loadHistoryFromDB() {
 }
 
 function saveHistoryToDB(historyArray) {
-    // Para guardar en IndexedDB, podemos guardar Blobs directamente.
-    // Solo eliminamos las blob URLs (strings) que no sirven para nada después de recargar.
-    const cleanArray = historyArray.map(item => {
-        const newItem = { ...item };
-        if (newItem.proposals) {
-            newItem.proposals = newItem.proposals.map(prop => ({
-                ...prop,
-                assets: prop.assets.map(asset => {
-                    const newAsset = { ...asset };
-                    if (newAsset.videoUrl && typeof newAsset.videoUrl === 'string' && (newAsset.videoUrl.startsWith('blob:') || newAsset.videoUrl.startsWith('data:'))) {
-                        newAsset.videoUrl = null;
-                    }
-                    return newAsset;
-                })
-            }));
-        }
-        return newItem;
-    });
-
+    // Limpiar blob URLs antes de guardar (no son persistentes)
+    var cleanArray = JSON.parse(JSON.stringify(historyArray)); // Data URIs serialize natively and safely
     return openDB().then(function (db) {
         return new Promise(function (resolve, reject) {
             var tx = db.transaction(DB_STORE, 'readwrite');
@@ -89,13 +72,21 @@ function downloadAsset(asset) {
     var fileName = 'creative_engine_' + asset.label.replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now();
 
     if (asset.videoUrl) {
-        // Video blob URL -> descargar directamente
-        var a = document.createElement('a');
-        a.href = asset.videoUrl;
-        a.download = fileName + '.mp4';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        fetch(asset.videoUrl)
+            .then(function (res) { return res.blob(); })
+            .then(function (blob) {
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = fileName + '.mp4';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(function () {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 100);
+            })
+            .catch(function (e) { alert("Error al descargar vídeo"); });
         return;
     }
 
@@ -186,14 +177,15 @@ function generateVideoWithVeo(imageDataUrl, prompt, modelName, generateAudio, au
                 }).then(function (res) {
                     return res.json();
                 }).then(function (status) {
-                    if (status.error) {
-                        throw new Error('Error de Veo: ' + (status.error.message || JSON.stringify(status.error)));
-                    }
                     if (status.done === true) {
+                        if (status.error) throw new Error('Error de Veo API: ' + (status.error.message || JSON.stringify(status.error)));
                         var videoUri = null;
                         try { videoUri = status.response.generateVideoResponse.generatedSamples[0].video.uri; } catch (e) { }
                         if (!videoUri) throw new Error('Vídeo generado pero sin URI. RAW: ' + JSON.stringify(status));
                         return videoUri;
+                    }
+                    if (status.error) {
+                        throw new Error('Error de Veo: ' + (status.error.message || JSON.stringify(status.error)));
                     }
                     return pollOperation();
                 });
@@ -216,16 +208,7 @@ function generateVideoWithVeo(imageDataUrl, prompt, modelName, generateAudio, au
         })
         .then(function (data) {
             if (!data.videoBase64) throw new Error('No se recibió el vídeo en base64.');
-            var binary = atob(data.videoBase64);
-            var bytes = new Uint8Array(binary.length);
-            for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-            var blob = new Blob([bytes], { type: data.mimeType || 'video/mp4' });
-            return {
-                base64: data.videoBase64,
-                mimeType: data.mimeType || 'video/mp4',
-                blob: blob,
-                url: URL.createObjectURL(blob)
-            };
+            return 'data:' + (data.mimeType || 'video/mp4') + ';base64,' + data.videoBase64;
         });
 }
 
@@ -248,35 +231,7 @@ function App() {
 
     useEffect(() => {
         loadHistoryFromDB().then(function (saved) {
-            if (saved && saved.length > 0) {
-                // Restaurar Blob URLs comprobando base64 o el método antiguo de Blob
-                const restored = saved.map(item => {
-                    if (item.proposals) {
-                        item.proposals.forEach(prop => {
-                            prop.assets.forEach(asset => {
-                                // Si usamos el nuevo sistema de base64
-                                if (asset.videoBase64) {
-                                    try {
-                                        asset.videoUrl = 'data:' + (asset.videoMimeType || 'video/mp4') + ';base64,' + asset.videoBase64;
-                                        console.log('Video restaurado desde base64 (Data URI) con éxito');
-                                    } catch (e) {
-                                        console.error('Error restaurando video desde base64:', e);
-                                    }
-                                } else if (asset.videoBlob) {
-                                    // Fallback para videos guardados justo después del parche anterior
-                                    try {
-                                        asset.videoUrl = URL.createObjectURL(asset.videoBlob);
-                                    } catch (e) {
-                                        console.error('Error restoring video URL:', e);
-                                    }
-                                }
-                            });
-                        });
-                    }
-                    return item;
-                });
-                setHistory(restored);
-            }
+            if (saved && saved.length > 0) setHistory(saved);
             historyLoaded.current = true;
         });
     }, []);
@@ -371,15 +326,15 @@ function App() {
             // Generar imágenes progresivamente para la propuesta única
             for (let i = 0; i < AD_STYLES.length; i++) {
                 const style = AD_STYLES[i];
-                const prompt = `${description}. ${style.promptSuffix}. IMPORTANTE: Cualquier texto que generes o aparezca en la imagen DEBE estar siempre en español.`;
+                const prompt = `${description}. ${style.promptSuffix}. CRITICAL INSTRUCTION OBLIGATORIA: CUALQUIER TEXTO VISIBLE QUE SE GENERE DEBE ESTAR ESTRICTAMENTE EN ESPAÑOL. NO INVENTES TEXTO EN OTROS IDIOMAS.`;
 
                 // Llamada real a la API
                 const imageUrl = await callGeminiImage(prompt, imagePreview);
 
                 setResults(prev => {
-                    const updated = { ...prev, proposals: [...prev.proposals] };
-                    updated.proposals[0] = { ...updated.proposals[0], assets: [...updated.proposals[0].assets] };
-                    updated.proposals[0].assets[i] = { ...updated.proposals[0].assets[i], url: imageUrl || 'https://via.placeholder.com/800x1000?text=Error+al+generar', loading: false };
+                    const updated = JSON.parse(JSON.stringify(prev)); // Deep copy para forzar re-render
+                    updated.proposals[0].assets[i].url = imageUrl || 'https://via.placeholder.com/800x1000?text=Error+al+generar';
+                    updated.proposals[0].assets[i].loading = false;
                     return updated;
                 });
             }
@@ -411,35 +366,31 @@ function App() {
 
         const originalUrl = currentAsset.url;
 
-        // Clonación manual para no romper Blobs
-        const newResults = { ...results, proposals: [...results.proposals] };
-        newResults.proposals[proposalIdx] = { ...newResults.proposals[proposalIdx], assets: [...newResults.proposals[proposalIdx].assets] };
-        newResults.proposals[proposalIdx].assets[assetIdx] = {
-            ...newResults.proposals[proposalIdx].assets[assetIdx],
-            loading: true,
-            url: null,
-            prompt: prompt,
-            videoUrl: null
-        };
+        // Clone prevent reference mutation
+        const newResults = JSON.parse(JSON.stringify(results));
+        const asset = newResults.proposals[proposalIdx].assets[assetIdx];
+
+        asset.loading = true;
+        asset.url = null;
+        asset.prompt = prompt; // Actualizamos el prompt con la versión del usuario
         setResults(newResults);
 
-        const strictPrompt = (prompt.trim() === ''
-            ? "Create a completely new, highly creative and visually striking product advertising variation using the reference image as inspiration."
-            : `CRITICAL INSTRUCTION: You are an expert photo retoucher. Your task is to accurately reproduce the provided reference image while applying ONLY the requested modifications. Do NOT hallucinate entirely new backgrounds, lighting, or compositions unless explicitly requested. Keep the original product perfectly intact. User requested edits: "${prompt}".`) + " IMPORTANT: Any text generated in the image MUST be in Spanish. Cualquier texto generado debe estar en español.";
+        const strictPrompt = prompt.trim() === ''
+            ? "Create a completely new, highly creative and visually striking product advertising variation using the reference image as inspiration. CRITICAL INSTRUCTION OBLIGATORIA: CUALQUIER TEXTO VISIBLE QUE SE GENERE DEBE ESTAR ESTRICTAMENTE EN ESPAÑOL. NO INVENTES TEXTO EN OTROS IDIOMAS."
+            : `CRITICAL INSTRUCTION: You are an expert photo retoucher. Your task is to accurately reproduce the provided reference image while applying ONLY the requested modifications. Do NOT hallucinate entirely new backgrounds, lighting, or compositions unless explicitly requested. Keep the original product perfectly intact. User requested edits: "${prompt}". CRITICAL INSTRUCTION OBLIGATORIA: CUALQUIER TEXTO VISIBLE QUE SE GENERE DEBE ESTAR ESTRICTAMENTE EN ESPAÑOL. NO GENERES TEXTO EN INGLÉS NI NINGÚN OTRO IDIOMA.`;
 
         const newUrl = await callGeminiImage(strictPrompt, originalUrl);
 
         if (newUrl) {
-            newResults.proposals[proposalIdx].assets[assetIdx].url = newUrl;
+            asset.url = newUrl;
         } else {
             console.error("Regeneration failed, reverting to previous image.");
-            newResults.proposals[proposalIdx].assets[assetIdx].url = originalUrl;
+            asset.url = originalUrl;
             alert('Falló la regeneración de la imagen. Por favor, intenta de nuevo.');
         }
 
-        newResults.proposals[proposalIdx].assets[assetIdx].loading = false;
-        newResults.proposals[proposalIdx].assets[assetIdx].videoUrl = null;
-        newResults.proposals[proposalIdx].assets[assetIdx].videoBlob = null; // Limpiar blob si existía
+        asset.loading = false;
+        asset.videoUrl = null;
 
         setResults(newResults);
         setHistory(prev => prev.map(item => item.id === results.id ? newResults : item));
@@ -467,16 +418,15 @@ function App() {
 
         const newVideoId = `vid_${Date.now()}`;
 
-        // Añadimos tarjeta en estado "cargando" con clonación segura
+        // Añadimos tarjeta en estado "cargando"
         setResults(prev => {
-            const updated = { ...prev, proposals: [...prev.proposals] };
-            updated.proposals[proposalIdx] = { ...updated.proposals[proposalIdx], assets: [...updated.proposals[proposalIdx].assets] };
+            const updated = JSON.parse(JSON.stringify(prev));
             updated.proposals[proposalIdx].assets.push({
                 id: newVideoId,
                 styleId: currentAsset.styleId,
                 label: `VIDEO: ${currentAsset.label}`,
                 url: currentAsset.url,
-                prompt: prompt,
+                prompt: prompt, // Actualizamos con la nueva instrucción visual
                 videoUrl: null,
                 loading: true
             });
@@ -487,9 +437,9 @@ function App() {
             const selectedModel = isStandard ? 'veo-3.1-generate-preview' : 'veo-3.1-fast-generate-preview';
 
             // Componemos el super-prompt visual
-            const videoPrompt = `Smooth cinematic product video, subtle motion, professional lighting, slow elegant movement, commercial quality. IMPORTANTE: Cualquier texto que aparezca en el vídeo DEBE estar en español. ${prompt}`;
+            const videoPrompt = `Smooth cinematic product video, subtle motion, professional lighting, slow elegant movement, commercial quality. ${prompt}. CRITICAL INSTRUCTION OBLIGATORIA: CUALQUIER TEXTO VISIBLE O AUDIO QUE SE GENERE DEBE ESTAR ESTRICTAMENTE EN ESPAÑOL. NO GENERES AUDIO NI TEXTO EN INGLÉS NI NINGÚN OTRO IDIOMA.`;
 
-            const resultData = await generateVideoWithVeo(
+            const videoUrl = await generateVideoWithVeo(
                 currentAsset.url,
                 videoPrompt,
                 selectedModel,
@@ -499,20 +449,13 @@ function App() {
             );
 
             setResults(prev => {
-                const updated = { ...prev, proposals: [...prev.proposals] };
-                updated.proposals[proposalIdx] = { ...updated.proposals[proposalIdx], assets: [...updated.proposals[proposalIdx].assets] };
+                const updated = JSON.parse(JSON.stringify(prev));
                 const vIdx = updated.proposals[proposalIdx].assets.findIndex(a => a.id === newVideoId);
                 if (vIdx !== -1) {
-                    updated.proposals[proposalIdx].assets[vIdx] = {
-                        ...updated.proposals[proposalIdx].assets[vIdx],
-                        videoUrl: resultData.url,
-                        videoBase64: resultData.base64,
-                        videoMimeType: resultData.mimeType,
-                        loading: false
-                    };
+                    updated.proposals[proposalIdx].assets[vIdx].videoUrl = videoUrl;
+                    updated.proposals[proposalIdx].assets[vIdx].loading = false;
                 }
-                const finalBatch = updated;
-                setHistory(prevHist => prevHist.map(item => item.id === finalBatch.id ? finalBatch : item));
+                setHistory(prevHist => prevHist.map(item => item.id === updated.id ? updated : item));
                 return updated;
             });
             setVideoStatus('');
@@ -703,7 +646,7 @@ function App() {
                                                 <span className="loading-text text-[10px] mt-4 font-bold text-center">{(asset.label && asset.label.startsWith('VIDEO') && videoStatus) ? videoStatus : 'GENERANDO...'}</span>
                                             </div>
                                         ) : asset.videoUrl ? (
-                                            <video src={asset.videoUrl} className="w-full aspect-[4/5] object-cover cursor-pointer" muted autoPlay loop onClick={() => setLightboxItem(asset)} />
+                                            <video src={asset.videoUrl} className="w-full aspect-[4/5] object-cover" muted autoPlay loop />
                                         ) : (
                                             <img src={asset.url} className="w-full aspect-[4/5] object-cover cursor-zoom-in transition-transform duration-500 group-hover:scale-105" onClick={() => setLightboxItem(asset)} />
                                         )}

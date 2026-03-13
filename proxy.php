@@ -154,8 +154,7 @@ if ($action === 'generate_video') {
     $payload = [
         'instances' => [$instance],
         'parameters' => [
-            'aspectRatio' => $aspectRatio,
-            'numberOfVideos' => 1
+            'aspectRatio' => $aspectRatio
         ]
     ];
 

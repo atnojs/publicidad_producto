@@ -16,6 +16,57 @@ const DB_NAME = 'creative_ads_engine_db';
 const DB_STORE = 'history';
 const DB_VERSION = 1;
 
+function isVideoSource(value) {
+    return typeof value === 'string' && (
+        value.startsWith('data:video/') ||
+        /\.(mp4|webm|ogg)(\?|#|$)/i.test(value)
+    );
+}
+
+function normalizeAsset(asset) {
+    if (!asset || typeof asset !== 'object') return asset;
+
+    var normalized = Object.assign({}, asset);
+    var hasVideoUrl = typeof normalized.videoUrl === 'string' && normalized.videoUrl.length > 0;
+    var urlIsVideo = isVideoSource(normalized.url);
+
+    if (!hasVideoUrl && urlIsVideo) {
+        normalized.videoUrl = normalized.url;
+        normalized.url = null;
+        hasVideoUrl = true;
+    }
+
+    if (!normalized.mediaType) {
+        normalized.mediaType = hasVideoUrl ? 'video' : 'image';
+    }
+
+    return normalized;
+}
+
+function normalizeHistoryItem(item) {
+    if (!item || !Array.isArray(item.proposals)) return item;
+    var normalizedItem = Object.assign({}, item);
+    normalizedItem.proposals = item.proposals.map(function (proposal) {
+        var normalizedProposal = Object.assign({}, proposal);
+        normalizedProposal.assets = Array.isArray(proposal.assets)
+            ? proposal.assets.map(normalizeAsset)
+            : [];
+        return normalizedProposal;
+    });
+    return normalizedItem;
+}
+
+function getVideoPlaybackUrl(asset) {
+    if (!asset || typeof asset !== 'object') return null;
+    if (isVideoSource(asset.videoUrl)) return asset.videoUrl;
+    if (isVideoSource(asset.url)) return asset.url;
+    return null;
+}
+
+function isAssetVideo(asset) {
+    return !!(asset && (asset.mediaType === 'video' || getVideoPlaybackUrl(asset)));
+}
+
 // ─── IndexedDB Helpers ───────────────────────────────────────
 function openDB() {
     return new Promise(function (resolve, reject) {
@@ -39,6 +90,7 @@ function loadHistoryFromDB() {
             var req = store.getAll();
             req.onsuccess = function () {
                 var items = req.result || [];
+                items = items.map(normalizeHistoryItem);
                 items.sort(function (a, b) { return b.id - a.id; });
                 resolve(items);
             };
@@ -70,9 +122,10 @@ function saveHistoryToDB(historyArray) {
 // ─── Download Helper (blob pattern, funciona en todos los navegadores) ───
 function downloadAsset(asset) {
     var fileName = 'creative_engine_' + asset.label.replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now();
+    var videoPlaybackUrl = getVideoPlaybackUrl(asset);
 
-    if (asset.videoUrl) {
-        fetch(asset.videoUrl)
+    if (videoPlaybackUrl) {
+        fetch(videoPlaybackUrl)
             .then(function (res) { return res.blob(); })
             .then(function (blob) {
                 var url = URL.createObjectURL(blob);
@@ -307,6 +360,7 @@ function App() {
                     url: null,
                     prompt: `${description}. ${style.promptSuffix}`,
                     videoUrl: null,
+                    mediaType: 'image',
                     loading: true
                 }))
             }));
@@ -365,6 +419,9 @@ function App() {
         setRegenerateModal(null);
 
         const originalUrl = currentAsset.url;
+        const styleConfig = AD_STYLES.find(s => s.id === currentAsset.styleId);
+        const styleHint = styleConfig ? styleConfig.promptSuffix : '';
+        const variationToken = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
         // Clone prevent reference mutation
         const newResults = JSON.parse(JSON.stringify(results));
@@ -376,10 +433,11 @@ function App() {
         setResults(newResults);
 
         const strictPrompt = prompt.trim() === ''
-            ? "Create a completely new, highly creative and visually striking product advertising variation using the reference image as inspiration. CRITICAL INSTRUCTION OBLIGATORIA: CUALQUIER TEXTO VISIBLE QUE SE GENERE DEBE ESTAR ESTRICTAMENTE EN ESPAÑOL. NO INVENTES TEXTO EN OTROS IDIOMAS."
-            : `CRITICAL INSTRUCTION: You are an expert photo retoucher. Your task is to accurately reproduce the provided reference image while applying ONLY the requested modifications. Do NOT hallucinate entirely new backgrounds, lighting, or compositions unless explicitly requested. Keep the original product perfectly intact. User requested edits: "${prompt}". CRITICAL INSTRUCTION OBLIGATORIA: CUALQUIER TEXTO VISIBLE QUE SE GENERE DEBE ESTAR ESTRICTAMENTE EN ESPAÑOL. NO GENERES TEXTO EN INGLÉS NI NINGÚN OTRO IDIOMA.`;
+            ? `Genera una NUEVA variacion publicitaria del producto que sea visualmente distinta a la version anterior, manteniendo el mismo estilo creativo (${styleHint}). Debe cambiar composicion, encuadre, fondo o iluminacion, pero conservar claramente el producto y su identidad. NO repitas la misma escena. Token de variacion obligatorio: ${variationToken}. CRITICAL INSTRUCTION OBLIGATORIA: CUALQUIER TEXTO VISIBLE QUE SE GENERE DEBE ESTAR ESTRICTAMENTE EN ESPAÑOL. NO INVENTES TEXTO EN OTROS IDIOMAS.`
+            : `Genera una NUEVA variacion del anuncio manteniendo el estilo creativo (${styleHint}) y aplicando estas instrucciones del usuario: "${prompt}". Resultado obligatorio: debe ser claramente diferente de la imagen anterior (cambia composicion, encuadre, fondo o iluminacion), sin alterar la identidad del producto. NO repitas la misma escena. Token de variacion obligatorio: ${variationToken}. CRITICAL INSTRUCTION OBLIGATORIA: CUALQUIER TEXTO VISIBLE QUE SE GENERE DEBE ESTAR ESTRICTAMENTE EN ESPAÑOL. NO GENERES TEXTO EN INGLES NI NINGUN OTRO IDIOMA.`;
 
-        const newUrl = await callGeminiImage(strictPrompt, originalUrl);
+        const sourceImageForRegeneration = results.baseImage || originalUrl;
+        const newUrl = await callGeminiImage(strictPrompt, sourceImageForRegeneration);
 
         if (newUrl) {
             asset.url = newUrl;
@@ -391,6 +449,7 @@ function App() {
 
         asset.loading = false;
         asset.videoUrl = null;
+        asset.mediaType = 'image';
 
         setResults(newResults);
         setHistory(prev => prev.map(item => item.id === results.id ? newResults : item));
@@ -428,6 +487,7 @@ function App() {
                 url: currentAsset.url,
                 prompt: prompt, // Actualizamos con la nueva instrucción visual
                 videoUrl: null,
+                mediaType: 'video',
                 loading: true
             });
             return updated;
@@ -453,6 +513,7 @@ function App() {
                 const vIdx = updated.proposals[proposalIdx].assets.findIndex(a => a.id === newVideoId);
                 if (vIdx !== -1) {
                     updated.proposals[proposalIdx].assets[vIdx].videoUrl = videoUrl;
+                    updated.proposals[proposalIdx].assets[vIdx].mediaType = 'video';
                     updated.proposals[proposalIdx].assets[vIdx].loading = false;
                 }
                 setHistory(prevHist => prevHist.map(item => item.id === updated.id ? updated : item));
@@ -645,8 +706,8 @@ function App() {
                                                 </div>
                                                 <span className="loading-text text-[10px] mt-4 font-bold text-center">{(asset.label && asset.label.startsWith('VIDEO') && videoStatus) ? videoStatus : 'GENERANDO...'}</span>
                                             </div>
-                                        ) : asset.videoUrl ? (
-                                            <video src={asset.videoUrl} className="w-full aspect-[4/5] object-cover" muted autoPlay loop />
+                                        ) : isAssetVideo(asset) ? (
+                                            <video src={getVideoPlaybackUrl(asset)} className="w-full aspect-[4/5] object-cover" muted autoPlay loop />
                                         ) : (
                                             <img src={asset.url} className="w-full aspect-[4/5] object-cover cursor-zoom-in transition-transform duration-500 group-hover:scale-105" onClick={() => setLightboxItem(asset)} />
                                         )}
@@ -666,7 +727,7 @@ function App() {
                                                         {asset.label}
                                                     </div>
                                                     <div className="flex gap-2">
-                                                        {!asset.videoUrl && !asset.id.startsWith('vid_') && (
+                                                        {!isAssetVideo(asset) && !asset.id.startsWith('vid_') && (
                                                             <button
                                                                 onClick={() => triggerRegenerate(activeProposalIdx, index)}
                                                                 className="w-8 h-8 rounded-full bg-indigo-600/80 hover:bg-indigo-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
@@ -675,7 +736,7 @@ function App() {
                                                                 <span className="tooltip">Regenerar Imagen</span>
                                                             </button>
                                                         )}
-                                                        {!asset.videoUrl ? (
+                                                        {!isAssetVideo(asset) ? (
                                                             <button
                                                                 onClick={() => triggerVideoGeneration(activeProposalIdx, index)}
                                                                 className="w-8 h-8 rounded-full bg-fuchsia-600/80 hover:bg-fuchsia-500 pointer-events-auto flex items-center justify-center transition-all shadow-lg group/btn relative"
@@ -719,9 +780,9 @@ function App() {
             {lightboxItem && (
                 <div className="lightbox cursor-zoom-out" onClick={() => setLightboxItem(null)}>
                     <div className="relative max-w-[95vw] max-h-[95vh] flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
-                        {lightboxItem.videoUrl ? (
+                        {isAssetVideo(lightboxItem) ? (
                             <video
-                                src={lightboxItem.videoUrl}
+                                src={getVideoPlaybackUrl(lightboxItem)}
                                 className="max-h-[85vh] w-auto rounded-lg shadow-2xl border border-white/10"
                                 controls
                                 autoPlay
